@@ -90,9 +90,15 @@ impl Game for TestGame {
 
     fn on_command(&self, me: &mut Me<'_, Self>, command: Command) {
         match command {
-            Command::Hit { target } => me.send(To::Entity(target), Action::Damage(10)),
-            Command::Blast { x, y, r } => me.send(To::Area { x, y, r }, Action::Damage(5)),
-            Command::Shout => me.send(To::Everyone, Action::Damage(1)),
+            Command::Hit { target } => {
+                me.send(To::Entity(target), Action::Damage(10));
+            }
+            Command::Blast { x, y, r } => {
+                me.send(To::Area { x, y, r }, Action::Damage(5));
+            }
+            Command::Shout => {
+                me.send(To::Everyone, Action::Damage(1));
+            }
             Command::Spawn => {
                 let (x, y) = (me.x + 1.0, me.y);
                 me.spawn(x, y, Data { hp: 7, ..Data::default() });

@@ -236,16 +236,17 @@ impl<G: Game> Me<'_, G> {
         self.group
     }
 
-    /// The trace of what's being handled (the incoming action's, or a fresh one in `tick`).
+    /// The trace of what's being handled: the incoming action's or command's, or 0 in
+    /// [`Game::tick`] (where each [`Me::send`] starts a new trace).
     pub fn trace(&self) -> u64 {
         self.trace
     }
 
     /// Send an action. It's delivered on the next tick wherever the target is (even if it's
     /// on another machine, or moving between groups), stamped with this entity's id, position
-    /// and the current tick.
-    pub fn send(&mut self, to: To, action: G::Action) {
-        let Some(bytes) = crate::codec::to_bytes(&action) else { return };
+    /// and the current tick. Returns its trace (to tag events with, for the debug view).
+    pub fn send(&mut self, to: To, action: G::Action) -> u64 {
+        let Some(bytes) = crate::codec::to_bytes(&action) else { return 0 };
         self.meta.seq += 1;
         let from = Facts { id: self.entity.id, group: self.group, x: self.entity.x, y: self.entity.y, tick: self.tick };
         let trace = if self.trace != 0 { self.trace } else { crate::codec::trace_id(self.entity.id, self.meta.seq) };
@@ -256,6 +257,7 @@ impl<G: Game> Me<'_, G> {
         };
         let env = Envelope { to, from, via: self.group, seq: self.meta.seq, trace, hops: 0, kind: Kind::Action { action: bytes } };
         self.requests.envelopes.push(env);
+        trace
     }
 
     /// Show an event to the players who can see this entity's position (and to this entity's

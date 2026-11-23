@@ -1,0 +1,16 @@
+[package]
+name = "medieval"
+description = "Example game for Worldmesh: an isometric world with swords, bows, fireballs and bots."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+tokio.workspace = true
+worldmesh = { path = "../../../crates/worldmesh" }
+
+[dev-dependencies]
+serde_json.workspace = true
