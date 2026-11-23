@@ -25,7 +25,7 @@ const rules: PredictionRules<State, number> = {
   position: (s) => ({ x: s.x, y: 0 }),
 };
 
-const entity = (x: number): SnapshotEntity<unknown> => ({ id: 1, x, y: 0, group: 1, spatial: 0x8001, player: true, view: {} });
+const entity = (x: number): SnapshotEntity<unknown> => ({ id: 1, x, y: 0, group: 1, spatial: 0x8001, player: true, kind: 'hero', view: {} });
 
 function setup() {
   let clock = 1000; // server clock, in ticks

@@ -12,6 +12,8 @@ import type {
   ClientMsg,
   DebugCommand,
   EntityId,
+  GameEvent,
+  Named,
   ProcessId,
   ProcessStats,
   ServerMsg,
@@ -37,10 +39,10 @@ export type Tracked<V> = {
 
 export type Status = 'connecting' | 'connected' | 'disconnected';
 
-export type ClientHandlers<V, E, W> = {
+export type ClientHandlers<V = Named, E = Named, W = Named> = {
   status?(status: Status): void;
   welcome?(welcome: Welcome<W>): void;
-  /** After the snapshot is applied to `entities`. */
+  /** After the snapshot is applied to `entities` (and its events went to `on` listeners). */
   snapshot?(snapshot: Snapshot<V, E>): void;
   added?(entity: Tracked<V>): void;
   removed?(id: EntityId): void;
@@ -93,7 +95,12 @@ function makeDelay(client: { fakeLatency: number; fakeJitter: number }) {
   };
 }
 
-export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown, C = unknown, S = unknown> {
+/**
+ * A connection to a world. The type parameters are your game's: V its visible components by
+ * name, E its events by name, W its welcome, I its input, C its commands by name, S the state
+ * your prediction rules track. All are optional.
+ */
+export class WorldmeshClient<V = Named, E = Named, W = Named, I = unknown, C = Named, S = unknown> {
   /** Your entity's id (-1 until the welcome). */
   me = -1;
   tickMs = 100;
@@ -123,6 +130,7 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
 
   private options: ClientOptions<S, I, V>;
   private listeners: ClientHandlers<V, E, W>[] = [];
+  private eventListeners = new Map<string, Set<(data: never, event: GameEvent<E>) => void>>();
 
   constructor(options: ClientOptions<S, I, V>, handlers: ClientHandlers<V, E, W> = {}) {
     this.options = options;
@@ -137,6 +145,16 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
   /** Also call these handlers (say, a debug panel's). */
   listen(handlers: ClientHandlers<V, E, W>) {
     this.listeners.push(handlers);
+  }
+
+  /** Call `fn` for every event named `name`, in the order they happened. Returns a function
+   *  that stops it. */
+  on<K extends keyof E & string>(name: K, fn: (data: E[K], event: GameEvent<E>) => void): () => void {
+    let set = this.eventListeners.get(name);
+    if (!set) this.eventListeners.set(name, (set = new Set()));
+    const f = fn as (data: never, event: GameEvent<E>) => void;
+    set.add(f);
+    return () => set.delete(f);
   }
 
   private emit<K extends keyof ClientHandlers<V, E, W>>(name: K, ...args: Parameters<NonNullable<ClientHandlers<V, E, W>[K]>>) {
@@ -208,9 +226,9 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
     return at;
   }
 
-  /** A command for your entity (handled by the game's `on_command`). */
-  sendCommand(command: C) {
-    this.send({ t: 'command', command });
+  /** A command for your entity, by name (handled by the world's handlers for it). */
+  sendCommand<K extends keyof C & string>(name: K, command: C[K]) {
+    this.send({ t: 'command', name, command });
   }
 
   /** How you want snapshots. */
@@ -266,6 +284,7 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
       if (msg.t === 'welcome') {
         this.decoder.me = msg.id;
         this.decoder.posScale = msg.pos_scale;
+        this.decoder.schema = msg.schema;
       }
     }
     this.meter.busyMs += performance.now() - started;
@@ -349,6 +368,9 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
       }
     }
     this.lastTick = tick;
+    for (const ev of msg.events) {
+      for (const fn of this.eventListeners.get(ev.name) ?? []) fn(ev.data as never, ev);
+    }
     this.emit('snapshot', msg);
   }
 }

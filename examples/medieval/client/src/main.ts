@@ -16,8 +16,9 @@ import { WorldmeshClient, type Assignment, type SenseDebug, type SnapshotEntity 
 import { DebugPanel, type TraceNote } from '@worldmesh/debug';
 
 import {
-  colorOf, movementRules, nameOf,
-  type Ability, type BotMode, type Command, type GameEvent, type Look, type MapData, type Move, type MoveState, type Target, type Welcome,
+  colorOf, lookOf, movementRules, nameOf,
+  type Ability, type BotMode, type Commands, type Components, type Events, type Happening, type Look, type MapData, type Move,
+  type MoveState, type Target, type Welcome,
 } from './game.ts';
 import { sanitizeDir, setTickMs, type Grid } from './movement.ts';
 
@@ -283,7 +284,7 @@ async function main() {
   /** When each ability may be asked for again (client-side guess; the server enforces it). */
   const readyAt: Record<Ability, number> = { sword: 0, bow: 0, fireball: 0 };
   /** Effects waiting for (or playing at) their moment on the render clock. */
-  type Fx = { at: number; ev: GameEvent; text?: BitmapText; note?: BitmapText };
+  type Fx = { at: number; ev: Happening; text?: BitmapText; note?: BitmapText };
   let effects: Fx[] = [];
   /** Effects seen, per second, for the last 10 s: [second, within one group, across, forwarded, total delay across]. */
   const hitBuckets: [number, number, number, number, number][] = [];
@@ -295,12 +296,12 @@ async function main() {
   /** Units that just moved to another group: a ring that grows and a note, for a second. */
   let handoffMarks: { at: number; id: number; from: number; to: number; note?: BitmapText }[] = [];
 
-  const client = new WorldmeshClient<Look, GameEvent, Welcome, Move, Command, MoveState>(
+  const client = new WorldmeshClient<Components, Events, Welcome, Move, Commands, MoveState>(
     {
       url: GATEWAY_URL,
       prediction: movementRules(() => grid),
       // We don't move while dead: show the server's view.
-      shouldPredict: (own) => !own.view.dead,
+      shouldPredict: (own) => own.view.dead === undefined,
     },
     {
       status: (status) => {
@@ -338,7 +339,7 @@ async function main() {
     },
     // For the bus view's "recent actions": who did what, and how it ended.
     traceNote: (event): TraceNote | undefined => {
-      const ev = event as GameEvent;
+      const ev = { k: event.name, ...(event.data as object) } as Happening;
       if (ev.k === 'used') {
         const aim = 'entity' in ev.target ? ` → ${unitName(ev.target.entity)}` : '';
         return { trace: ev.trace, start: { label: `${unitName(ev.actor)} ${ev.ability}${aim}`, group: ev.group, area: !('entity' in ev.target) } };
@@ -659,7 +660,7 @@ async function main() {
 
   const OUTCOME_TEXT = { hit: 'hit', killed: 'killed', out_of_range: 'missed (out of reach)', blocked: 'missed (a wall in the way)' };
 
-  const onGameEvent = (ev: GameEvent) => {
+  const onGameEvent = (ev: Happening) => {
     effects.push({ at: ev.tick * tickMs(), ev });
     if (ev.k !== 'effect') return;
     const cross = ev.from_group !== ev.to_group;
@@ -679,6 +680,8 @@ async function main() {
     const amount = ev.damage ? ` ${ev.damage}` : '';
     log(`${unitName(ev.actor)} ${OUTCOME_TEXT[ev.outcome]} ${unitName(ev.target)} (${ev.ability}${amount})${where}`, mine);
   };
+  client.on('used', (used) => onGameEvent({ k: 'used', ...used }));
+  client.on('effect', (effect) => onGameEvent({ k: 'effect', ...effect }));
 
   // ---- Combat and bots (a section of the debug panel) ----
   const bots = panel.addSection('Combat and bots');
@@ -691,11 +694,11 @@ async function main() {
   const q = <T extends HTMLElement>(cls: string) => bots.querySelector<T>(`.${cls}`)!;
   q('bots-spawn').addEventListener('click', (e) => {
     const count = Math.max(1, Math.min(200, Number(q<HTMLInputElement>('bots-count').value) || 20));
-    client.sendCommand({ k: 'spawn_bots', count, mode: q<HTMLSelectElement>('bots-mode').value as BotMode });
+    client.sendCommand('spawn_bots', { count, mode: q<HTMLSelectElement>('bots-mode').value as BotMode });
     (e.currentTarget as HTMLElement).blur();
   });
   q('bots-clear').addEventListener('click', (e) => {
-    client.sendCommand({ k: 'clear_bots' });
+    client.sendCommand('clear_bots', null);
     (e.currentTarget as HTMLElement).blur();
   });
   const combatStats = q('combat-stats');
@@ -720,17 +723,17 @@ async function main() {
     if (combatStats.textContent !== text) combatStats.textContent = text;
   };
 
-  const toUnit = (s: SnapshotEntity<Look>): Unit => ({
-    ...s.view,
+  const toUnit = (s: SnapshotEntity<Components>): Unit => ({
+    ...lookOf(s),
     id: s.id,
-    name: nameOf(s.id, s.view.bot),
+    name: nameOf(s.id, s.kind === 'bot'),
     x: s.x,
     y: s.y,
     group: s.group,
     spatial: s.spatial,
   });
 
-  const applySnapshot = (msg: { entities: SnapshotEntity<Look>[]; events: GameEvent[]; senses: SenseDebug[] }) => {
+  const applySnapshot = (msg: { entities: SnapshotEntity<Components>[]; senses: SenseDebug[] }) => {
     for (const s of msg.entities) {
       const unit = toUnit(s);
       let e = units.get(s.id);
@@ -755,7 +758,6 @@ async function main() {
         meDead = unit.dead;
       }
     }
-    for (const ev of msg.events) onGameEvent(ev);
     const now = performance.now();
     for (const sense of msg.senses) senseMarks.push({ at: now, s: sense });
     updateCombatStats();
@@ -872,7 +874,7 @@ async function main() {
   const useAbility = (ability: Ability, target: Target) => {
     if (meDead || performance.now() < readyAt[ability]) return false;
     readyAt[ability] = performance.now() + ABILITIES[ability].cooldownMs + 60;
-    client.sendCommand({ k: 'use', ability, target });
+    client.sendCommand('use', { ability, target });
     return true;
   };
 

@@ -1,9 +1,10 @@
 //! Every message Worldmesh sends: between the browser and the gateway, and between server
 //! processes on the bus.
 //!
-//! The game's own data (entity views, inputs, commands, actions, events) travels as opaque
-//! bytes (MessagePack). Only the group hosts, which run the game's code, decode it. Spatial
-//! Layer Cells, the gateway and the orchestrator never need to know what a game is.
+//! The game's own data (components, inputs, commands, actions, events) travels as MessagePack
+//! bytes tagged with ids from the world's [`Schema`]. Only the group hosts, which run the
+//! game's code, decode it. Spatial Layer Cells and the orchestrator never need to know what a
+//! game is; the gateway only checks what players send and names things for JSON clients.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

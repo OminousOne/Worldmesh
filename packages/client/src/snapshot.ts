@@ -3,18 +3,20 @@
 //
 // The decoder keeps every entity in view and applies each snapshot to them, then hands back a
 // full snapshot, as if it had come as JSON: an entity the server didn't mention simply hasn't
-// changed. The game's views and events arrive as MessagePack and are decoded to plain objects.
+// changed, and neither has a component it didn't mention. Components and events arrive as
+// MessagePack with ids; the schema from the welcome turns the ids into names.
 
 import { decode } from '@msgpack/msgpack';
 
-import type { Snapshot, SnapshotEntity } from './protocol.ts';
+import type { GameEvent, Named, Schema, Snapshot, SnapshotEntity } from './protocol.ts';
 
 export const KIND_SNAPSHOT = 1;
 export const KIND_FULL = 2;
 const POS = 1;
 const GROUP = 2;
 const SPATIAL = 4;
-const VIEW = 8;
+const PARTS = 8;
+const GONE = 16;
 
 /** Is this binary message an optimized snapshot (rather than JSON)? */
 export const isCompact = (buf: ArrayBuffer) => {
@@ -23,12 +25,14 @@ export const isCompact = (buf: ArrayBuffer) => {
   return kind === KIND_SNAPSHOT || kind === KIND_FULL;
 };
 
-export class SnapshotDecoder<V = unknown, E = unknown> {
+export class SnapshotDecoder<V = Named, E = Named> {
   /** Your own entity's id: its position comes exact (4-byte floats), everyone else's in 2 bytes. */
   me = -1;
   /** Other entities' positions are steps of 1 / posScale tiles (from the welcome). */
   posScale = 512;
-  private known = new Map<number, SnapshotEntity<V>>();
+  /** The names of the world's components, messages and kinds (from the welcome). */
+  schema: Schema = { components: [], messages: [], kinds: [] };
+  private known = new Map<number, SnapshotEntity<Named>>();
   private text = new TextDecoder();
 
   /** Forget everything (the next snapshot after switching formats sends everyone in full). */
@@ -50,7 +54,8 @@ export class SnapshotDecoder<V = unknown, E = unknown> {
       at += len;
       return value;
     };
-    const fields = (e: SnapshotEntity<V>) => {
+    const name = (list: string[], id: number) => list[id] ?? `#${id}`;
+    const fields = (e: SnapshotEntity<Named>) => {
       const mask = u8();
       if (mask & POS) {
         if (e.id === this.me) {
@@ -63,7 +68,15 @@ export class SnapshotDecoder<V = unknown, E = unknown> {
       }
       if (mask & GROUP) e.group = u16();
       if (mask & SPATIAL) e.spatial = u16();
-      if (mask & VIEW) e.view = msgpack() as V;
+      if (mask & PARTS) {
+        for (let n = u8(); n > 0; n--) {
+          const c = u16();
+          e.view[name(this.schema.components, c)] = msgpack();
+        }
+      }
+      if (mask & GONE) {
+        for (let n = u8(); n > 0; n--) delete e.view[name(this.schema.components, u16())];
+      }
     };
 
     if (u8() === KIND_FULL) this.known.clear();
@@ -72,7 +85,8 @@ export class SnapshotDecoder<V = unknown, E = unknown> {
     for (let n = u16(); n > 0; n--) {
       const id = u32();
       const player = (u8() & 1) !== 0;
-      const e: SnapshotEntity<V> = { id, x: 0, y: 0, group: 0, spatial: 0, player, view: undefined as V };
+      const kind = name(this.schema.kinds, u16());
+      const e: SnapshotEntity<Named> = { id, x: 0, y: 0, group: 0, spatial: 0, player, kind, view: {} };
       fields(e);
       this.known.set(id, e);
     }
@@ -80,18 +94,22 @@ export class SnapshotDecoder<V = unknown, E = unknown> {
       const id = u32();
       // An update for an entity we don't have can only be a leftover from before a reset:
       // read past it.
-      fields(this.known.get(id) ?? ({ id } as SnapshotEntity<V>));
+      fields(this.known.get(id) ?? { id, x: 0, y: 0, group: 0, spatial: 0, player: false, kind: '', view: {} });
     }
     for (let n = u16(); n > 0; n--) this.known.delete(u32());
-    const events: E[] = [];
-    for (let n = u16(); n > 0; n--) events.push(msgpack() as E);
+    const events: GameEvent<Named>[] = [];
+    for (let n = u16(); n > 0; n--) {
+      const msg = u16();
+      events.push({ name: name(this.schema.messages, msg), data: msgpack() });
+    }
     const debugLen = u32();
     const debug = debugLen ? JSON.parse(this.text.decode(bytes.subarray(at, at + debugLen))) : {};
     return {
       t: 'snapshot',
       tick,
-      entities: [...this.known.values()].map((e) => ({ ...e })),
-      events,
+      // Copies: the decoder keeps changing its own.
+      entities: [...this.known.values()].map((e) => ({ ...e, view: { ...e.view } })) as unknown as SnapshotEntity<V>[],
+      events: events as unknown as GameEvent<E>[],
       senses: debug.senses ?? [],
       bus: debug.bus ?? [],
       streams: debug.streams ?? [],

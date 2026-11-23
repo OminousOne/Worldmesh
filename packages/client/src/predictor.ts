@@ -28,7 +28,7 @@ export interface PredictionRules<S, I, V = unknown> {
   fromServer(entity: SnapshotEntity<V>, held: I): S;
   /** One tick from `state`, with the inputs that take effect during it (in sub-step order).
    *  With `untilSub`, stop that many (possibly fractional) sub-steps in, for drawing between
-   *  ticks. Must match the server's `Game::tick` exactly. */
+   *  ticks. Must match the server's movement system exactly. */
   simulateTick(state: S, changes: Timed<I>[], untilSub?: number): S;
   /** Where `state` is, in tiles. */
   position(state: S): { x: number; y: number };
