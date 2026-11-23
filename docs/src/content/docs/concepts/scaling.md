@@ -21,7 +21,7 @@ Lowering it hands every entity of the groups taken out of use to the rest, and s
 When a group releases an entity:
 
 1. It finishes the tick (the entity is in that tick's report, so it never vanishes from view).
-2. It sends the entity's full record to the new group's inbox: your `Data`, plus Worldmesh's bookkeeping (the last tick it was simulated, its recent positions for `position_at`, which actions it already got, and any of its player's inputs not yet due).
+2. It sends the entity's full record to the new group's inbox: its kind and every component (visible or not), plus Worldmesh's bookkeeping (the last tick it was simulated, its recent positions for `position_at`, which actions it already got, and any of its player's inputs not yet due).
 3. For a second, it keeps listening on the entity's subject and forwards anything that reaches it to the new group.
 
 The new group starts simulating it from the next tick (never the same tick twice: it skips any tick the old group already ran). The player sees nothing: no pause, no lost input, no action applied twice.

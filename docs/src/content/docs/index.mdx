@@ -20,9 +20,9 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 ## What you get
 
 <CardGrid>
-  <Card title="Write one trait" icon="pencil">
-    Implement `Game`: what an entity holds, what players send, what entities do to each
-    other, and one tick of one entity. No servers, no sockets, no routing in your code.
+  <Card title="Your game, as plugins" icon="pencil">
+    Worldmesh does the networking and none of the game. You add components, commands,
+    actions, events and systems in plugins. No servers, no sockets, no routing in your code.
   </Card>
   <Card title="Split by load, not by map" icon="random">
     Server Entity Groups simulate entities wherever they stand. Spatial Layer Cells own
@@ -51,6 +51,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 <CardGrid>
   <LinkCard title="Introduction" href="/Worldmesh/getting-started/introduction/" description="What Worldmesh is for, and how it's put together." />
   <LinkCard title="Architecture" href="/Worldmesh/concepts/architecture/" description="Groups, cells, the orchestrator, gateways and the bus." />
-  <LinkCard title="Game trait reference" href="/Worldmesh/reference/game-trait/" description="Everything a game implements, and everything it can do." />
+  <LinkCard title="Plugins, components and messages" href="/Worldmesh/concepts/plugins-and-components/" description="What Worldmesh does, what your game adds, and how a game is put together." />
+  <LinkCard title="World reference" href="/Worldmesh/reference/world/" description="Everything a game registers, and everything its code can do from an entity." />
   <LinkCard title="For AI agents" href="/Worldmesh/reference/agents/" description="llms.txt, agent skills, and the rules agents should follow." />
 </CardGrid>

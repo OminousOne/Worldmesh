@@ -5,26 +5,26 @@ description: What an entity is, how entities affect each other across servers, a
 
 ## Entities
 
-An entity is `Entity<Data>`: what Worldmesh needs (an id, a position, whether a player controls it) plus your game's `Data`.
+An entity is what Worldmesh needs (an id, a position, whether a player controls it, a kind) plus the components your game gives it.
 
 ```rust
-pub struct Entity<D> {
+pub struct Entity {
     pub id: EntityId,
     pub x: f32,      // in tiles; where it stands decides who can see it
     pub y: f32,
     pub player: bool,
-    pub data: D,     // yours
+    // its kind, and its components: get::<T>(), get_mut::<T>(), has::<T>()
 }
 ```
 
-- **Players' entities** have the player's id (1 to 2³¹ - 1, given by the gateway). They're created by `Game::join` when the player connects and removed when they disconnect.
-- **Spawned entities** (bots, monsters, projectiles) come from `me.spawn(x, y, data)`. The orchestrator gives them ids from 2³¹ up and picks their group. `me.despawn()` removes one.
+- **Players' entities** have the player's id (1 to 2³¹ - 1, given by the gateway). The world's `join` function says where they appear and as what kind when the player connects; they're removed when the player disconnects.
+- **Spawned entities** (bots, monsters, projectiles) come from `me.spawn(Spawn::new("bot", x, y))`. The orchestrator gives them ids from 2³¹ up and picks their group. `me.despawn()` removes one.
 
-Your `Data` travels with the entity whenever it moves to another group, so keep everything the entity needs in it: HP, cooldowns, AI state, inventory.
+An entity's components travel with it whenever it moves to another group, so keep everything the entity needs in them: HP, cooldowns, AI state, inventory.
 
-## Views
+## What others see
 
-`Game::view` is what others see of an entity: the browsers that can see it, and other entities asking "what's near me?". It's computed every tick and only sent to a browser when its bytes change, but keep it small anyway: it goes to everyone in view.
+Visible components (registered with `world.visible::<T>()`) are what others see of an entity: the browsers that can see it, and other entities asking "what's near me?". Each is sent to a browser only when its bytes change, and on its own, so a health change doesn't resend anything else. Keep the rest hidden: it never leaves the entity's server except in a handoff.
 
 ## Actions
 
@@ -36,7 +36,7 @@ Entities affect each other only through actions. `me.send(to, action)` sends one
 | `To::Area { x, y, r }` | Every entity within `r` tiles of (x, y), except the sender |
 | `To::Everyone` | Every entity in the world, except the sender (use sparingly) |
 
-The target handles it in `Game::on_action`, in its own group.
+The target handles it with every handler registered for that action (`world.action(f)`), in its own group, in the order they were registered.
 
 ### Always the next tick
 
@@ -48,7 +48,7 @@ Each action is numbered by its sender. If the target was just handed to another 
 
 ### What you can trust
 
-`on_action` gets an `Incoming`:
+An action handler gets an `Incoming`:
 
 ```rust
 pub struct Incoming {
@@ -74,15 +74,15 @@ if reach > SWORD_RANGE { return; } // out of reach: nothing happens
 
 The medieval example splits each ability in two, and so can your game:
 
-1. **The user's side** (`on_command` or `tick`, in the user's group): alive? cooldown ready? a point within reach? Then `me.send` it.
-2. **The target's side** (`on_action`, in the target's group): was I in reach (and in sight) when it was sent? Then apply it.
+1. **The user's side** (a command handler or a system, in the user's group): alive? cooldown ready? a point within reach? Then `me.send` it.
+2. **The target's side** (an action handler, in the target's group): was I in reach (and in sight) when it was sent? Then apply it.
 
 Each side checks what only it knows exactly. Neither needs the other's state.
 
 ## Commands
 
-A command is a player's request (`Game::Command`), sent from the browser, checked by the gateway against your type, and delivered to the player's own entity on the next tick in `Game::on_command`. A command for someone else's entity is impossible: the gateway only addresses commands to the sender's own entity.
+A command is a player's request, sent from the browser by name (`client.sendCommand('use', { ability: 'bow' })`), checked by the gateway against the type registered under that name, and delivered to the player's own entity on the next tick, to every handler registered for it. A command for someone else's entity is impossible: the gateway only addresses commands to the sender's own entity. So is sending an action from a browser: the gateway accepts only names registered as commands.
 
 ## Events
 
-`me.emit(event)` shows something to the players who can see where it happened (and the entity's own player). `me.emit_at(x, y, event)` places it elsewhere, and `me.emit_involving(event, &[ids])` also sends it to those players wherever they are, so an archer sees "hit" even when the target was off their screen. Events are for showing things; they change nothing.
+`me.emit(event)` shows something to the players who can see where it happened (and the entity's own player). `me.emit_at(x, y, event)` places it elsewhere, and `me.emit_involving(event, &[ids])` also sends it to those players wherever they are, so an archer sees "hit" even when the target was off their screen. Events are for showing things; they change nothing. Browsers get each as `{ name, data }`, and `client.on('tagged', fn)` listens for one.

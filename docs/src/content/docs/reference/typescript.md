@@ -7,7 +7,13 @@ description: The API of @worldmesh/client and @worldmesh/debug.
 
 ### `WorldmeshClient<V, E, W, I, C, S>`
 
-Type parameters: your View, Event, Welcome, Input, Command, and predicted State.
+Type parameters, all optional: your visible components by name (`V`), events by name (`E`), welcome (`W`), input (`I`), commands by name (`C`), and predicted state (`S`).
+
+```ts
+type Components = { health?: number; dead?: { until: number } };
+type Events = { effect: { target: number; damage: number } };
+type Commands = { use: { ability: string }; clear_bots: null };
+```
 
 ```ts
 new WorldmeshClient(options: ClientOptions<S, I, V>, handlers?: ClientHandlers<V, E, W>)
@@ -25,25 +31,26 @@ new WorldmeshClient(options: ClientOptions<S, I, V>, handlers?: ClientHandlers<V
 | Handler | Called |
 | --- | --- |
 | `status(status)` | `'connecting'`, `'connected'`, `'disconnected'` |
-| `welcome(welcome)` | On connect: your id, the world config, your game's welcome |
-| `snapshot(snapshot)` | Every tick, after `entities` is updated |
+| `welcome(welcome)` | On connect: your id, the world config, your game's welcome values, the schema |
+| `snapshot(snapshot)` | Every tick, after `entities` is updated and `on` listeners ran |
 | `added(entity)`, `removed(id)` | An entity came into view, or left it |
 | `handoff(id, from, to)` | An entity moved to another group |
 | `ownership(assignment)` | The assignment changed |
 | `stats(processes)` | Once a second |
 
-More handlers can be added later with `client.listen(handlers)`.
+More handlers can be added later with `client.listen(handlers)`, and listeners for one kind of event with `client.on(name, fn)`.
 
 | Member | |
 | --- | --- |
 | `connect()`, `close()` | |
 | `me` | Your entity's id (-1 until the welcome) |
-| `entities` | `Map<id, Tracked<V>>`: `state` (the newest `SnapshotEntity`), `samples`, `lastSeen` |
+| `entities` | `Map<id, Tracked<V>>`: `state` (the newest `SnapshotEntity`: `id`, `x`, `y`, `group`, `spatial`, `player`, `kind`, `view`), `samples`, `lastSeen` |
 | `positionOf(id, renderTime?)` | Where to draw an entity this frame: yours predicted, others interpolated |
 | `frame(dtMs)` | Call every frame (advances prediction) |
 | `renderTime()`, `serverClock()` | The server time others are drawn at (ms); the server's tick (fractional) |
 | `sendInput(input)` | Predicted at once, sent for the right tick and sub-step |
-| `sendCommand(command)` | |
+| `sendCommand(name, data)` | A command for your entity, by name |
+| `on(name, fn)` | `fn(data, event)` for every event named `name`; returns a function that stops it |
 | `setSettings({ compact?, debug? })` | |
 | `sendDebug(command)` | Scaling, regroup, bus encoding, fake lag (`--allow-debug` gateways) |
 | `fakeLatency`, `fakeJitter` | Simulated delay on everything sent and received (ms) |
@@ -57,7 +64,7 @@ More handlers can be added later with `client.listen(handlers)`.
 interface PredictionRules<S, I, V> {
   idle: I;                                            // the input held before any is sent
   fromServer(entity: SnapshotEntity<V>, held: I): S;  // your state from the server's word, plus the held input
-  simulateTick(state: S, changes: Timed<I>[], untilSub?: number): S; // exactly your Game::tick
+  simulateTick(state: S, changes: Timed<I>[], untilSub?: number): S; // exactly your server's movement
   position(state: S): { x: number; y: number };
   isIdle?(input: I): boolean;                         // default: it is `idle`
 }
@@ -65,7 +72,7 @@ interface PredictionRules<S, I, V> {
 
 ### Also exported
 
-`Predictor`, `SnapshotDecoder` and `isCompact` (to decode snapshots yourself), `sampleAt`, `isSpatial`, and the protocol types: `Welcome`, `Snapshot`, `SnapshotEntity`, `Assignment`, `ProcessStats`, `SenseDebug`, `BusMsg`, `StreamMsg`, `WorldConfig`, `ViewShape`, `DebugCommand`, `ClientMsg`, `ServerMsg`.
+`Predictor`, `SnapshotDecoder` and `isCompact` (to decode snapshots yourself), `sampleAt`, `isSpatial`, and the protocol types: `Welcome`, `Schema`, `Snapshot`, `SnapshotEntity`, `GameEvent`, `Named`, `Assignment`, `ProcessStats`, `SenseDebug`, `BusMsg`, `StreamMsg`, `WorldConfig`, `ViewShape`, `DebugCommand`, `ClientMsg`, `ServerMsg`.
 
 ## `@worldmesh/debug`
 
@@ -79,7 +86,7 @@ new DebugPanel(options: DebugPanelOptions)
 | `parent` | Where to put the panels (default `document.body`) |
 | `keys` | Keyboard shortcuts (default `true`) |
 | `onOverlay(overlay, on)` | An overlay was switched |
-| `traceNote(event)` | What one of your events says about its trace, for the bus view |
+| `traceNote(event)` | What one of your events (`{ name, data }`) says about its trace, for the bus view |
 
 | Member | |
 | --- | --- |

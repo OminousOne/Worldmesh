@@ -21,10 +21,10 @@ export default defineConfig({
         starlightLlmsTxt({
           projectName: 'Worldmesh',
           description:
-            'Worldmesh is a Rust networking library for large multiplayer worlds. Games implement one trait (Game); Worldmesh runs it across Server Entity Groups (which simulate entities), Spatial Layer Cells (which own areas and answer "what\'s near me?"), an orchestrator and gateways, all over NATS. Browser clients use @worldmesh/client.',
+            'Worldmesh is a Rust networking library for large multiplayer worlds. It does the networking and none of the game: a game is a World built from plugins that register components, commands, actions, events, systems and kinds. Worldmesh runs it across Server Entity Groups (which simulate entities), Spatial Layer Cells (which own areas and answer "what\'s near me?"), an orchestrator and gateways, all over NATS. Browser clients use @worldmesh/client.',
           details:
-            'For agents: start with the Game trait reference and the "Your first game" guide. Game code only runs in Server Entity Groups, inside Game::tick, on_command and on_action, through the Me handle. Actions are always delivered on the next tick, wherever the target is. Test game rules with worldmesh::testing::TestWorld (no NATS needed).',
-          promote: ['getting-started/**', 'reference/game-trait', 'concepts/**'],
+            'For agents: start with the World reference and the "Your first game" guide. Game code only runs in Server Entity Groups, in systems and command/action handlers, through the Me handle, and only changes the entity it runs for. Actions are always delivered on the next tick, wherever the target is. Test game rules with worldmesh::testing::TestWorld (no NATS needed).',
+          promote: ['getting-started/**', 'reference/world', 'concepts/**'],
         }),
       ],
       sidebar: [
@@ -39,6 +39,7 @@ export default defineConfig({
         {
           label: 'Concepts',
           items: [
+            { label: 'Plugins, components and messages', slug: 'concepts/plugins-and-components' },
             { label: 'Architecture', slug: 'concepts/architecture' },
             { label: 'Entities and actions', slug: 'concepts/entities-and-actions' },
             { label: 'Ticks, inputs and prediction', slug: 'concepts/ticks-and-inputs' },
@@ -59,7 +60,7 @@ export default defineConfig({
         {
           label: 'Reference',
           items: [
-            { label: 'Game trait and Me', slug: 'reference/game-trait' },
+            { label: 'World, plugins and Me', slug: 'reference/world' },
             { label: 'Configuration and CLI', slug: 'reference/configuration' },
             { label: 'Wire protocol', slug: 'reference/protocol' },
             { label: 'TypeScript packages', slug: 'reference/typescript' },

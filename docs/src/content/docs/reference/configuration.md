@@ -5,7 +5,7 @@ description: WorldConfig, the command line every process takes, and the environm
 
 ## `WorldConfig`
 
-Returned by `Game::config`. Must be the same in every process.
+Passed to `World::new`. Must be the same in every process (it's your code, so it is).
 
 ```rust
 pub struct WorldConfig {
@@ -29,11 +29,11 @@ The default is 64 × 64 tiles, 8-tile chunks, a 20 × 12 rectangle view and 16 s
 ```rust
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    worldmesh::run(MyGame::new()).await
+    worldmesh::run(my_world()).await
 }
 ```
 
-`worldmesh::run` parses the command line, sets up logging (`RUST_LOG`, default `info`, unless you set up `tracing` yourself), connects to NATS (retrying every second until it's there) and runs the role. `worldmesh::run_with(game, cli)` takes a `worldmesh::Cli` you parsed yourself, say as a subcommand of a bigger CLI.
+`worldmesh::run` parses the command line, sets up logging (`RUST_LOG`, default `info`, unless you set up `tracing` yourself), builds the world (so a mistake in it, like two components with the same name, stops every role at start), connects to NATS (retrying every second until it's there) and runs the role. `worldmesh::run_with(world, cli)` takes a `worldmesh::Cli` you parsed yourself, say as a subcommand of a bigger CLI.
 
 ## Command line
 

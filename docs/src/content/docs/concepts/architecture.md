@@ -12,8 +12,8 @@ A Worldmesh world is a set of processes that talk over [NATS](https://nats.io). 
 A group simulates a set of entities: players, bots, monsters, projectiles, anything your game spawns. Each entity lives in exactly one group at a time, wherever it stands on the map. Every tick, the group:
 
 1. delivers the actions and commands that arrived since its last tick,
-2. runs `Game::tick` for each of its entities (with the player's inputs due that tick),
-3. reports its entities to the Spatial Layer Cells whose areas they stand in, with each one's view and any "what's near me?" questions,
+2. runs your systems, stage by stage, for each of its entities (with the player's inputs due that tick),
+3. reports its entities to the Spatial Layer Cells whose areas they stand in, with each one's kind and visible components and any "what's near me?" questions,
 4. sends what its entities did: actions, events, spawns, and any entities it was told to hand off.
 
 A group process can run any number of groups (the orchestrator asks it to start or stop them). Groups are where your game's simulation runs, and the only place it runs.
@@ -38,8 +38,8 @@ It never sees game traffic and never runs game code.
 
 A gateway holds players' WebSockets. It:
 
-- welcomes each player (your `Game::welcome`, plus the world's config) and asks the orchestrator to place them (your `Game::join`),
-- checks each input and command against your types (a message that doesn't parse as your `Input` or `Command` is dropped) and sends it to the player's entity, wherever it is,
+- welcomes each player (your world's welcome values, its config, and the names of its components, messages and kinds) and asks the orchestrator to place them (your `join` function),
+- checks each input and command against your types (an input that doesn't parse as your input type, or a command whose name isn't a registered command or whose data doesn't parse, is dropped) and sends it to the player's entity, wherever it is,
 - every tick, tells the cells where each player is looking, merges the views they send back, and sends each player a snapshot: compact binary with only what changed, or JSON.
 
 ## What happens in one tick

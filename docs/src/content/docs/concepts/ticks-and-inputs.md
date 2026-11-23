@@ -9,13 +9,17 @@ Every process ticks on the same clock: tick `n` is `n × tick_ms` milliseconds a
 
 ## Inputs at a sub-step
 
-A player's input (`Game::Input`) is "what I'm holding from now on": a direction, buttons. Each tick is split into `WorldConfig::input_substeps` sub-steps (16 in the examples), and every input names the exact tick and sub-step it takes effect at. Your `tick` gets the inputs due during that tick, in order:
+A player's input (the type registered with `world.input::<Move>()`) is "what I'm holding from now on": a direction, buttons. Each tick is split into `WorldConfig::input_substeps` sub-steps (16 in the examples), and every input names the exact tick and sub-step it takes effect at. A system reads the inputs due during this tick, in order:
 
 ```rust
-fn tick(&self, me: &mut Me<'_, Self>, inputs: &[Timed<Move>]) {
-    // inputs[i].sub: the sub-step it takes effect at; inputs[i].input: your Move
+fn walk(me: &mut Me<'_>) {
+    for t in me.inputs::<Move>() {
+        // t.sub: the sub-step it takes effect at; t.input: your Move
+    }
 }
 ```
+
+What an input does is up to your game: Worldmesh only gets it to the right entity at the right moment.
 
 Releasing a key half way through a tick stops you half way through, not at a tick boundary.
 
