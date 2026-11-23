@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["crates/worldmesh"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/OminousOne/Worldmesh"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1"
+async-nats = "0.52"
+axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3"
+rmp-serde = "1"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+debug = false
