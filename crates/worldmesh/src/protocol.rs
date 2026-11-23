@@ -458,6 +458,9 @@ pub struct EventAt {
     pub y: f32,
     #[serde(with = "serde_bytes")]
     pub event: Vec<u8>,
+    /// Players who get it wherever they are (besides everyone who can see (x, y)).
+    #[serde(default)]
+    pub involves: Vec<EntityId>,
 }
 
 /// Group -> Spatial Layer Cell, every tick (even when empty, so the cell knows the group is done).

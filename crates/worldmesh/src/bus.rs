@@ -219,7 +219,7 @@ mod tests {
             tick: 1000,
             entities: (0..50).map(|id| Reported { id, x: 12.25 + id as f32, y: 30.5, player: id % 2 == 0, view: bytes.clone() }).collect(),
             queries: vec![SenseQuery { id: 1, x: 2.0, y: 3.0, r: 6.0, nearest: 8, target: Some(4) }],
-            events: vec![EventAt { x: 1.0, y: 2.0, event: bytes.clone() }],
+            events: vec![EventAt { x: 1.0, y: 2.0, event: bytes.clone(), involves: vec![1] }],
         };
         let (json, bin) = round_trip(&report);
         assert!(bin * 2 < json, "binary {bin} vs json {json}");

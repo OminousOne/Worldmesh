@@ -185,7 +185,7 @@ pub(crate) struct Record<D> {
 /// Things the game asked for during a callback, carried out by the group afterwards.
 pub(crate) struct Requests<G: Game> {
     pub envelopes: Vec<Envelope>,
-    pub events: Vec<(f32, f32, G::Event)>,
+    pub events: Vec<(f32, f32, G::Event, Vec<EntityId>)>,
     pub spawns: Vec<Spawn<G::Data>>,
     pub queries: Vec<SenseQuery>,
 }
@@ -258,15 +258,25 @@ impl<G: Game> Me<'_, G> {
         self.requests.envelopes.push(env);
     }
 
-    /// Show an event to the players who can see this entity's position.
+    /// Show an event to the players who can see this entity's position (and to this entity's
+    /// own player, wherever they're looking).
     pub fn emit(&mut self, event: G::Event) {
-        let (x, y) = (self.entity.x, self.entity.y);
-        self.requests.events.push((x, y, event));
+        let (x, y, id) = (self.entity.x, self.entity.y, self.entity.id);
+        self.requests.events.push((x, y, event, vec![id]));
     }
 
     /// Show an event to the players who can see (x, y).
     pub fn emit_at(&mut self, x: f32, y: f32, event: G::Event) {
-        self.requests.events.push((x, y, event));
+        self.requests.events.push((x, y, event, Vec::new()));
+    }
+
+    /// Like [`Me::emit`], and also to these players wherever they are (say, whoever caused
+    /// it, so they see the result of their action even if it landed off their screen).
+    pub fn emit_involving(&mut self, event: G::Event, players: &[EntityId]) {
+        let (x, y, id) = (self.entity.x, self.entity.y, self.entity.id);
+        let mut involves = players.to_vec();
+        involves.push(id);
+        self.requests.events.push((x, y, event, involves));
     }
 
     /// Ask the spatial layer who's within `r` tiles of this entity, in any group. The answer

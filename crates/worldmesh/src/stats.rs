@@ -18,6 +18,12 @@ pub struct Counter {
     bytes: AtomicU64,
 }
 
+impl Default for Counter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Counter {
     pub const fn new() -> Self {
         Self { msgs: AtomicU64::new(0), bytes: AtomicU64::new(0) }

@@ -69,6 +69,9 @@ pub struct Counters {
 }
 
 /// One Server Entity Group's world: its entities and everything in flight for them.
+/// One entity's latest answer to "what's near me?": (tick of the positions, what it saw).
+type SenseRound<V> = (u64, Vec<Sensed<V>>);
+
 pub struct GroupWorld<G: Game> {
     pub group_id: GroupId,
     game: Arc<G>,
@@ -85,7 +88,7 @@ pub struct GroupWorld<G: Game> {
     /// Entities handed off recently: (new group, until this tick). Envelopes for them are forwarded.
     moved: BTreeMap<EntityId, (GroupId, u64)>,
     /// Each entity's latest answer to "what's near me?": (tick of the positions, what it saw).
-    senses: BTreeMap<EntityId, (u64, Vec<Sensed<G::View>>)>,
+    senses: BTreeMap<EntityId, SenseRound<G::View>>,
     /// Questions asked this tick, sent with the reports.
     queries: Vec<SenseQuery>,
     /// Entities the orchestrator asked us to hand off: (entity, new group).
@@ -357,9 +360,9 @@ impl<G: Game> GroupWorld<G> {
         for env in requests.envelopes {
             self.route(env);
         }
-        for (x, y, event) in requests.events {
+        for (x, y, event, involves) in requests.events {
             if let Some(event) = codec::to_bytes(&event) {
-                self.events.push(EventAt { x, y, event });
+                self.events.push(EventAt { x, y, event, involves });
             }
         }
         for spawn in requests.spawns {
@@ -880,8 +883,8 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, first_group: O
                 continue;
             }
             for id in cmd.start {
-                if !runners.contains_key(&id) {
-                    runners.insert(id, Runner::start(&nats, id, game.clone(), assignment.as_ref()).await?);
+                if let std::collections::btree_map::Entry::Vacant(slot) = runners.entry(id) {
+                    slot.insert(Runner::start(&nats, id, game.clone(), assignment.as_ref()).await?);
                 }
             }
             for id in cmd.stop {
