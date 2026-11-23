@@ -1,0 +1,56 @@
+---
+title: Worldmesh
+description: A Rust networking library that splits a large multiplayer world across many servers while players see one seamless world.
+template: splash
+hero:
+  tagline: One seamless world for players. As many servers as it takes behind it. You write the game; Worldmesh splits it up, hands entities between servers live, and keeps everyone's view whole.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Run the example
+      link: /Worldmesh/getting-started/quickstart/
+      icon: right-arrow
+    - text: Your first game
+      link: /Worldmesh/getting-started/first-game/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What you get
+
+<CardGrid>
+  <Card title="Write one trait" icon="pencil">
+    Implement `Game`: what an entity holds, what players send, what entities do to each
+    other, and one tick of one entity. No servers, no sockets, no routing in your code.
+  </Card>
+  <Card title="Split by load, not by map" icon="random">
+    Server Entity Groups simulate entities wherever they stand. Spatial Layer Cells own
+    areas and answer "what's near me?". Scale either one, while the world runs.
+  </Card>
+  <Card title="Actions land anywhere" icon="rocket">
+    An arrow to an entity on another machine, mid-handoff, lands exactly once on the next
+    tick. The target's side checks it with positions it can trust.
+  </Card>
+  <Card title="Smooth in the browser" icon="laptop">
+    `@worldmesh/client` interpolates everyone else and predicts your own entity bit for
+    bit with your movement rules, adapting to the connection.
+  </Card>
+  <Card title="See inside" icon="magnifier">
+    `@worldmesh/debug` shows who simulates what and whose area is whose, scales the world,
+    adds fake lag per server, and draws every message on the bus.
+  </Card>
+  <Card title="Test without servers" icon="approve-check">
+    `TestWorld` runs a whole world in one process, tick by tick, with real groups and
+    cells passing real messages.
+  </Card>
+</CardGrid>
+
+## Start here
+
+<CardGrid>
+  <LinkCard title="Introduction" href="/Worldmesh/getting-started/introduction/" description="What Worldmesh is for, and how it's put together." />
+  <LinkCard title="Architecture" href="/Worldmesh/concepts/architecture/" description="Groups, cells, the orchestrator, gateways and the bus." />
+  <LinkCard title="Game trait reference" href="/Worldmesh/reference/game-trait/" description="Everything a game implements, and everything it can do." />
+  <LinkCard title="For AI agents" href="/Worldmesh/reference/agents/" description="llms.txt, agent skills, and the rules agents should follow." />
+</CardGrid>

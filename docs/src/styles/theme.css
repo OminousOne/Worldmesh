@@ -46,7 +46,7 @@
 .sl-markdown-content :is(h1, h2, h3) { letter-spacing: -0.015em; }
 .sl-markdown-content pre { border-radius: 8px; }
 .sl-markdown-content table { font-size: 0.9rem; }
-.sl-markdown-content code:not(pre code) {
+.sl-markdown-content :not(pre, h1, h2, h3, h4) > code {
   background: var(--sl-color-gray-6);
   border: 1px solid var(--sl-color-gray-5);
   border-radius: 4px;

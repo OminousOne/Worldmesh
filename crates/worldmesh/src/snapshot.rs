@@ -402,7 +402,7 @@ mod tests {
         // 7 moved, 101 got hurt (view changed) and moved group, 102 is gone (5 ticks later it leaves).
         let second = vec![entity(me, 10.623_4, 20.5, 1, 100), entity(101, 12.25, 20.75, 3, 88)];
         let rest: Vec<Vec<u8>> =
-            (1001..=1005).map(|tick| enc.encode(me, tick, &second, &[&event], &[sense.clone()], &[], &[])).collect();
+            (1001..=1005).map(|tick| enc.encode(me, tick, &second, &[&event], std::slice::from_ref(&sense), &[], &[])).collect();
         let q = |v: f32| f64::from(quantize(v, SCALE)) / f64::from(SCALE);
         let shown = |e: &ViewEntity| {
             let (x, y) = if e.id == me { (f64::from(e.x), f64::from(e.y)) } else { (q(e.x), q(e.y)) };
