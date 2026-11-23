@@ -1,0 +1,79 @@
+//! Bus subjects (NATS topics) and id conventions. Everything Worldmesh sends on the bus goes to
+//! one of these.
+
+use crate::protocol::{EntityId, GroupId};
+
+/// Group, group process or Spatial Layer Cell -> orchestrator: "I'm alive (and here's what I hold)".
+pub const HEARTBEATS: &str = "control.heartbeat";
+/// Orchestrator -> everyone: which groups and cells are in use, and who owns which chunk.
+pub const ASSIGNMENTS: &str = "control.assignments";
+/// Gateway -> orchestrator: debug panel commands.
+pub const DEBUG_COMMANDS: &str = "control.debug";
+/// Gateway -> orchestrator: a player connected (the orchestrator picks their group).
+pub const JOINS: &str = "control.joins";
+/// Groups -> orchestrator: the game spawned entities (the orchestrator gives ids, picks groups).
+pub const SPAWNS: &str = "control.spawns";
+/// Orchestrator or gateway -> groups: spawn, release, leave.
+pub const GROUP_COMMANDS: &str = "control.groups";
+/// Orchestrator -> group processes: start or stop groups (a process can run any number).
+pub const HOST_COMMANDS: &str = "control.hosts";
+/// Every server process -> gateways: CPU, memory and traffic, once a second.
+pub const STATS: &str = "control.stats";
+/// Actions for every entity in every group.
+pub const BROADCAST: &str = "group.all.inbox";
+/// Gateway -> every Spatial Layer Cell, every tick: where each connected player is looking.
+pub const VIEWERS: &str = "spatial.viewers";
+/// Spatial Layer Cells -> gateway, every tick: what each player can see in that cell's area.
+pub const VIEWS: &str = "gateway.views";
+/// Every server process -> gateway, every tick: what it sent and received (debug views only).
+pub const DEBUG_REPORTS: &str = "debug.reports";
+
+/// Envelopes for one entity. Only the group simulating it subscribes (it subscribes when it
+/// takes the entity and keeps listening a little after handing it off, forwarding strays).
+pub fn entity_subject(entity: EntityId) -> String {
+    format!("entity.{entity}")
+}
+
+/// Envelopes for one group: handoffs, forwards, area actions passed on by Spatial Layer Cells.
+/// One subject, so messages from any one sender arrive in the order they were sent: an action
+/// forwarded after a handoff never overtakes the handoff.
+pub fn group_inbox_subject(group: GroupId) -> String {
+    format!("group.{group}.inbox")
+}
+
+/// Spatial Layer Cells -> one group: answers to its entities' "what's near me?".
+pub fn group_senses_subject(group: GroupId) -> String {
+    format!("group.{group}.senses")
+}
+
+/// Groups -> one Spatial Layer Cell, every tick: their entities in its area, their questions
+/// about it, and what happened in it.
+pub fn spatial_reports_subject(spatial: GroupId) -> String {
+    format!("spatial.{spatial}.reports")
+}
+
+/// Area actions for one Spatial Layer Cell to pass on to whoever is in the area.
+pub fn spatial_inbox_subject(spatial: GroupId) -> String {
+    format!("spatial.{spatial}.inbox")
+}
+
+/// Spatial Layer Cell ids have this bit set and group ids don't, so a bare id says which it is.
+pub const SPATIAL_ID_BIT: u32 = 0x8000;
+
+pub fn is_spatial_id(id: u32) -> bool {
+    id & SPATIAL_ID_BIT != 0
+}
+
+/// A fresh random id for a group (or, with `spatial`, a Spatial Layer Cell).
+pub fn random_process_id(spatial: bool) -> u32 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    let raw = (h.finish() as u32 % 0x7ffe) + 1; // 1..=0x7ffe, never 0
+    if spatial {
+        raw | SPATIAL_ID_BIT
+    } else {
+        raw & !SPATIAL_ID_BIT
+    }
+}
