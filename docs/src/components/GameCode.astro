@@ -1,0 +1,18 @@
+---
+// The tag game's plugin and handlers, read from examples/hello at build time so the landing page
+// always shows the code that actually runs.
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { Code } from '@astrojs/starlight/components';
+
+const file = 'examples/hello/src/main.rs';
+const source = readFileSync(resolve(process.cwd(), '..', file), 'utf8');
+const from = source.indexOf('/// The whole game, as one plugin.');
+const to = source.indexOf('/// Walk, changing direction');
+if (from < 0 || to < from) {
+  throw new Error(`GameCode: the markers it cuts ${file} at have moved; update GameCode.astro`);
+}
+const code = source.slice(from, to).trimEnd();
+---
+
+<Code {code} lang="rust" title={file} />

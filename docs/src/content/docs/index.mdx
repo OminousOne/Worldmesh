@@ -3,55 +3,97 @@ title: Worldmesh
 description: A Rust networking library that splits a large multiplayer world across many servers while players see one seamless world.
 template: splash
 hero:
-  tagline: One seamless world for players. As many servers as it takes behind it. You write the game; Worldmesh splits it up, hands entities between servers live, and keeps everyone's view whole.
-  image:
-    file: ../../assets/logo.svg
+  title: One seamless world, on as many servers as it takes.
+  tagline: Worldmesh is a Rust networking library for large multiplayer games. You write the game as plugins. Worldmesh splits the world across servers, moves entities between them while they keep moving, and builds every player's view whole.
   actions:
     - text: Run the example
       link: /Worldmesh/getting-started/quickstart/
-      icon: right-arrow
-    - text: Your first game
+    - text: Build your first game
       link: /Worldmesh/getting-started/first-game/
-      variant: minimal
+      variant: secondary
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import GameCode from '../../components/GameCode.astro';
+import StartHere from '../../components/StartHere.astro';
 
-## What you get
+<div class="wm-landing">
 
-<CardGrid>
-  <Card title="Your game, as plugins" icon="pencil">
-    Worldmesh does the networking and none of the game. You add components, commands,
-    actions, events and systems in plugins. No servers, no sockets, no routing in your code.
-  </Card>
-  <Card title="Split by load, not by map" icon="random">
-    Server Entity Groups simulate entities wherever they stand. Spatial Layer Cells own
-    areas and answer "what's near me?". Scale either one, while the world runs.
-  </Card>
-  <Card title="Actions land anywhere" icon="rocket">
-    An arrow to an entity on another machine, mid-handoff, lands exactly once on the next
-    tick. The target's side checks it with positions it can trust.
-  </Card>
-  <Card title="Smooth in the browser" icon="laptop">
-    `@worldmesh/client` interpolates everyone else and predicts your own entity bit for
-    bit with your movement rules, adapting to the connection.
-  </Card>
-  <Card title="See inside" icon="magnifier">
-    `@worldmesh/debug` shows who simulates what and whose area is whose, scales the world,
-    adds fake lag per server, and draws every message on the bus.
-  </Card>
-  <Card title="Test without servers" icon="approve-check">
-    `TestWorld` runs a whole world in one process, tick by tick, with real groups and
-    cells passing real messages.
-  </Card>
-</CardGrid>
+<section class="wm-code">
+
+## Your game is a plugin
+
+This is the whole of tag, the example game, apart from walking: a visible component, a command, two
+actions and an event. Nothing in it knows about servers. `To::Entity(target)` reaches the target
+wherever it's simulated, and the target judges the tag by where both players stood on that tick.
+[Build it step by step](/Worldmesh/getting-started/first-game/).
+
+<GameCode />
+
+</section>
+
+<section class="wm-features">
+
+## What Worldmesh handles
+
+<div class="wm-feature-grid">
+<div>
+
+### Split by load, not by map
+
+Server Entity Groups simulate entities wherever they stand. Spatial Layer Cells own areas and
+answer "what's near me?". Scale either one while the world runs.
+
+</div>
+<div>
+
+### Handoffs mid-stride
+
+When groups are added or removed, entities move between them while they keep moving. The new group
+picks up on the next tick: no pause, no lost input, no action applied twice.
+
+</div>
+<div>
+
+### Actions land anywhere
+
+An arrow aimed at an entity on another machine, even one mid-handoff, arrives on the next tick and
+is never applied twice. The target's side judges it with positions it can trust.
+
+</div>
+<div>
+
+### Smooth in the browser
+
+`@worldmesh/client` interpolates everyone else and predicts your own entity bit for bit with your
+movement rules, adapting to the connection.
+
+</div>
+<div>
+
+### See inside
+
+`@worldmesh/debug` shows who simulates what and whose area is whose, scales the world, adds fake
+lag per server, and draws every message on the bus.
+
+</div>
+<div>
+
+### Test without servers
+
+`TestWorld` runs a whole world in one process, tick by tick, with real groups and cells passing
+real messages.
+
+</div>
+</div>
+
+</section>
+
+<section class="wm-start-here">
 
 ## Start here
 
-<CardGrid>
-  <LinkCard title="Introduction" href="/Worldmesh/getting-started/introduction/" description="What Worldmesh is for, and how it's put together." />
-  <LinkCard title="Architecture" href="/Worldmesh/concepts/architecture/" description="Groups, cells, the orchestrator, gateways and the bus." />
-  <LinkCard title="Plugins, components and messages" href="/Worldmesh/concepts/plugins-and-components/" description="What Worldmesh does, what your game adds, and how a game is put together." />
-  <LinkCard title="World reference" href="/Worldmesh/reference/world/" description="Everything a game registers, and everything its code can do from an entity." />
-  <LinkCard title="For AI agents" href="/Worldmesh/reference/agents/" description="llms.txt, agent skills, and the rules agents should follow." />
-</CardGrid>
+<StartHere />
+
+</section>
+
+</div>

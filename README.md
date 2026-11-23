@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/src/assets/logo.png" alt="Worldmesh logo" width="160"></p>
+
 # Worldmesh
 
 Worldmesh is a networking library written in Rust, with a TypeScript client for the browser, that lets games split the processing of large multiplayer worlds across many servers while keeping it one seamless experience.

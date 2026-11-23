@@ -11,11 +11,29 @@ export default defineConfig({
     starlight({
       title: 'Worldmesh',
       description: 'A Rust networking library that splits a large multiplayer world across many servers while players see one seamless world.',
-      logo: { src: './src/assets/logo.svg', replacesTitle: false },
-      favicon: '/favicon.svg',
+      logo: { src: './src/assets/logo.png', alt: '', replacesTitle: false },
+      favicon: '/favicon.ico',
+      head: [
+        { tag: 'link', attrs: { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/Worldmesh/favicon.png' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/Worldmesh/apple-touch-icon.png' } },
+        { tag: 'meta', attrs: { name: 'theme-color', content: '#071f29' } },
+      ],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/OminousOne/Worldmesh' }],
       editLink: { baseUrl: 'https://github.com/OminousOne/Worldmesh/edit/main/docs/' },
-      customCss: ['./src/styles/theme.css'],
+      customCss: [
+        '@fontsource-variable/unbounded',
+        '@fontsource-variable/figtree',
+        '@fontsource-variable/spline-sans-mono',
+        './src/styles/theme.css',
+      ],
+      components: { Hero: './src/components/Hero.astro' },
+      expressiveCode: {
+        styleOverrides: {
+          borderRadius: '10px',
+          codeFontFamily: 'var(--__sl-font-mono)',
+          uiFontFamily: 'var(--__sl-font)',
+        },
+      },
       lastUpdated: true,
       plugins: [
         starlightLlmsTxt({

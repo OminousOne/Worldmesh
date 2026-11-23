@@ -1,5 +1,6 @@
 # Builds the documentation site (docs/) and publishes it to GitHub Pages at
-# https://ominousone.github.io/Worldmesh/ whenever the docs change on main.
+# https://ominousone.github.io/Worldmesh/ whenever the docs change on main. The landing page
+# shows code from examples/hello, so changes there rebuild it too.
 name: Docs
 
 on:
@@ -7,6 +8,7 @@ on:
     branches: [main]
     paths:
       - docs/**
+      - examples/hello/src/**
       - .github/workflows/docs.yml
   workflow_dispatch:
 

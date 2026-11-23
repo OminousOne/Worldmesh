@@ -1,0 +1,98 @@
+---
+// "Start here" on the landing page. Each link wears the color of its sidebar section.
+const links = [
+  {
+    section: 'forest',
+    title: 'Introduction',
+    href: '/Worldmesh/getting-started/introduction/',
+    description: "What Worldmesh is for, and how it's put together.",
+  },
+  {
+    section: 'ocean',
+    title: 'Architecture',
+    href: '/Worldmesh/concepts/architecture/',
+    description: 'Groups, cells, the orchestrator, gateways and the bus.',
+  },
+  {
+    section: 'ocean',
+    title: 'Plugins, components and messages',
+    href: '/Worldmesh/concepts/plugins-and-components/',
+    description: 'What Worldmesh does, what your game adds, and how a game is put together.',
+  },
+  {
+    section: 'volcano',
+    title: 'World reference',
+    href: '/Worldmesh/reference/world/',
+    description: 'Everything a game registers, and everything its code can do from an entity.',
+  },
+  {
+    section: 'volcano',
+    title: 'For AI agents',
+    href: '/Worldmesh/reference/agents/',
+    description: 'llms.txt, agent skills, and the rules agents should follow.',
+  },
+];
+---
+
+<ul class="wm-start not-content">
+  {
+    links.map((l) => (
+      <li>
+        <a href={l.href} style={`--wm-region: var(--wm-${l.section})`}>
+          <span class="title">{l.title}</span>
+          <span class="description">{l.description}</span>
+        </a>
+      </li>
+    ))
+  }
+</ul>
+
+<style>
+  .wm-start {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border-top: 1px solid var(--sl-color-hairline-light);
+  }
+  li {
+    border-bottom: 1px solid var(--sl-color-hairline-light);
+  }
+  a {
+    display: grid;
+    gap: 0.2rem 2rem;
+    padding: 1rem 0.75rem;
+    margin-inline: -0.75rem;
+    border-radius: 10px;
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+  }
+  a:hover {
+    background: color-mix(in oklab, var(--wm-region) 12%, transparent);
+  }
+  .title {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--sl-color-white);
+  }
+  .title::before {
+    content: '';
+    display: inline-block;
+    width: 0.72rem;
+    height: 0.64rem;
+    margin-inline-end: 0.6rem;
+    border-radius: 55% 45% 50% 50% / 60% 55% 45% 40%;
+    background: var(--wm-region);
+    box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.28);
+  }
+  a:hover .title {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.2em;
+  }
+  @media (min-width: 50rem) {
+    a {
+      grid-template-columns: 22rem 1fr;
+      align-items: baseline;
+    }
+  }
+</style>

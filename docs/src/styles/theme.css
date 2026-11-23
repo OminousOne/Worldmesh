@@ -1,57 +1,277 @@
-/* A clean, Stripe-like look: one indigo accent, cool greys, generous type, quiet borders. */
+/*
+ * Worldmesh docs theme. Every color comes from the logo: a world split into regions (forest,
+ * volcano, ocean, sand) joined by cyan seams. In the docs, cyan marks what you can act on, and
+ * each sidebar section is one region, so its color tells you where you are.
+ */
+
 :root {
-  --sl-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
-  --sl-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
-  --sl-text-base: 1rem;
+  /* Logo colors. */
+  --wm-seam: #0bf4fd;
+  --wm-deep: #00435a;
+  --wm-forest: #a8cf04;
+  --wm-volcano: #ee4755;
+  --wm-ocean: #068da6;
+  --wm-sand: #fcc003;
+  --wm-lava: #f16d02;
+
+  --sl-font: 'Figtree Variable';
+  --sl-font-mono: 'Spline Sans Mono Variable';
+  --wm-font-display: 'Unbounded Variable', var(--__sl-font);
+
+  --sl-text-base: 1.0625rem;
+  --sl-text-body: var(--sl-text-base);
   --sl-line-height: 1.7;
   --sl-content-width: 46rem;
   --sl-sidebar-width: 17rem;
 }
-:root[data-theme='light'],
-::backdrop {
-  --sl-color-accent-low: #e9e8ff;
-  --sl-color-accent: #635bff;
-  --sl-color-accent-high: #2e2a8f;
-  --sl-color-white: #0a2540;
-  --sl-color-gray-1: #1a2b42;
-  --sl-color-gray-2: #33475b;
-  --sl-color-gray-3: #556677;
-  --sl-color-gray-4: #8798ad;
-  --sl-color-gray-5: #c1ccd8;
-  --sl-color-gray-6: #e6ebf1;
-  --sl-color-gray-7: #f6f9fc;
-  --sl-color-black: #ffffff;
-}
+
+/* Dark mode: the deep sea around the world. */
 :root {
-  --sl-color-accent-low: #1f1d4a;
-  --sl-color-accent: #8f88ff;
-  --sl-color-accent-high: #d6d3ff;
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #e6ebf1;
-  --sl-color-gray-2: #c1ccd8;
-  --sl-color-gray-3: #8798ad;
-  --sl-color-gray-4: #556677;
-  --sl-color-gray-5: #33475b;
-  --sl-color-gray-6: #1a2b42;
-  --sl-color-black: #0a1626;
+  --sl-color-gray-1: #e6f0f3;
+  --sl-color-gray-2: #c2d5dc;
+  --sl-color-gray-3: #85a3af;
+  --sl-color-gray-4: #4f6f7c;
+  --sl-color-gray-5: #1d4352;
+  --sl-color-gray-6: #0b2a36;
+  --sl-color-gray-7: #09232e;
+  --sl-color-black: #071f29;
+
+  --sl-color-accent-low: #073b49;
+  --sl-color-accent: #19e6f7;
+  --sl-color-accent-high: #9ff4fc;
+
+  /* Asides and badges: note is ocean, tip is forest, caution is sand, danger is volcano. */
+  --sl-color-blue-low: #073b49;
+  --sl-color-blue: #19e6f7;
+  --sl-color-blue-high: #a6f6fd;
+  --sl-color-purple-low: #26330a;
+  --sl-color-purple: #b6da04;
+  --sl-color-purple-high: #e3f59a;
+  --sl-color-green-low: #26330a;
+  --sl-color-green: #b6da04;
+  --sl-color-green-high: #e3f59a;
+  --sl-color-orange-low: #3d2a05;
+  --sl-color-orange: #fcc003;
+  --sl-color-orange-high: #ffe7a0;
+  --sl-color-red-low: #42161d;
+  --sl-color-red: #ee4755;
+  --sl-color-red-high: #ffc2c7;
+
+  --sl-color-backdrop-overlay: rgb(4 20 27 / 0.7);
+}
+
+/* Light mode: daylight over the same map. */
+:root[data-theme='light'],
+[data-theme='light'] ::backdrop {
+  --sl-color-white: #0b2430;
+  --sl-color-gray-1: #14323e;
+  --sl-color-gray-2: #24414d;
+  --sl-color-gray-3: #4a6774;
+  --sl-color-gray-4: #7a929c;
+  --sl-color-gray-5: #bfd0d7;
+  --sl-color-gray-6: #e4eef1;
+  --sl-color-gray-7: #f2f8fa;
+  --sl-color-black: #ffffff;
+
+  --sl-color-accent-low: #d4f6fb;
+  --sl-color-accent: #00758f;
+  --sl-color-accent-high: #00495a;
+
+  --sl-color-blue-low: #d4f6fb;
+  --sl-color-blue: #00a3bf;
+  --sl-color-blue-high: #00495a;
+  --sl-color-purple-low: #eef8c9;
+  --sl-color-purple: #7a9c00;
+  --sl-color-purple-high: #3d5000;
+  --sl-color-green-low: #eef8c9;
+  --sl-color-green: #7a9c00;
+  --sl-color-green-high: #3d5000;
+  --sl-color-orange-low: #fff1c7;
+  --sl-color-orange: #e0a200;
+  --sl-color-orange-high: #6b4600;
+  --sl-color-red-low: #fde2e4;
+  --sl-color-red: #d93445;
+  --sl-color-red-high: #8a1622;
+
+  --sl-color-backdrop-overlay: rgb(11 36 48 / 0.45);
+}
+
+/* Header: the logo and the name, set in the display face. */
+.site-title {
+  font-family: var(--wm-font-display);
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  color: var(--sl-color-white);
+  gap: 0.6rem;
+}
+.site-title img {
+  height: 2.4rem;
+}
+
+/* Sidebar: each top-level section is a region of the world. */
+.sidebar-content ul.top-level > li {
+  --wm-region: var(--sl-color-text-accent);
+}
+.sidebar-content ul.top-level > li:nth-child(1) {
+  --wm-region: var(--wm-forest);
+}
+.sidebar-content ul.top-level > li:nth-child(2) {
+  --wm-region: var(--wm-ocean);
+}
+.sidebar-content ul.top-level > li:nth-child(3) {
+  --wm-region: var(--wm-sand);
+}
+.sidebar-content ul.top-level > li:nth-child(4) {
+  --wm-region: var(--wm-volcano);
+}
+.sidebar-content ul.top-level > li > details > summary .group-label::before {
+  content: '';
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.62rem;
+  margin-inline-end: 0.55rem;
+  border-radius: 55% 45% 50% 50% / 60% 55% 45% 40%;
+  background: var(--wm-region);
+  box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.28);
+  vertical-align: 0.02em;
+}
+.sidebar-content .group-label .large {
+  font-weight: 700;
+  color: var(--sl-color-white);
+}
+.sidebar-content a {
+  border-radius: 6px;
+}
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover,
+.sidebar-content a[aria-current='page']:focus {
+  background: color-mix(in oklab, var(--wm-region) 16%, transparent);
+  color: var(--sl-color-white);
+  font-weight: 650;
+  box-shadow: inset 3px 0 0 var(--wm-region);
+}
+
+/* Page titles in the display face; body headings in the text face. */
+h1[data-page-title] {
+  font-family: var(--wm-font-display);
+  font-weight: 650;
+  font-size: clamp(1.85rem, 1.35rem + 1.6vw, 2.55rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+.sl-markdown-content :is(h2, h3, h4) {
+  color: var(--sl-color-white);
+  letter-spacing: -0.012em;
 }
 .sl-markdown-content h2 {
-  margin-top: 2.6rem;
-  padding-top: 1.4rem;
-  border-top: 1px solid var(--sl-color-gray-6);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  margin-top: 2.75rem;
+  font-size: clamp(1.5rem, 1.3rem + 0.6vw, 1.8rem);
+  font-weight: 750;
 }
-.sl-markdown-content h3 { font-weight: 600; }
-.sl-markdown-content :is(h1, h2, h3) { letter-spacing: -0.015em; }
-.sl-markdown-content pre { border-radius: 8px; }
-.sl-markdown-content table { font-size: 0.9rem; }
+.sl-markdown-content h3 {
+  margin-top: 2rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+.sl-markdown-content h4 {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  text-decoration-thickness: 2px;
+}
+
 .sl-markdown-content :not(pre, h1, h2, h3, h4) > code {
-  background: var(--sl-color-gray-6);
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 4px;
-  padding: 0.05rem 0.3rem;
-  font-size: 0.85em;
+  background: var(--sl-color-bg-inline-code);
+  border-radius: 5px;
+  padding: 0.1rem 0.32rem;
+  font-size: 0.86em;
 }
-.hero h1 { letter-spacing: -0.03em; }
-.card { border-radius: 10px; }
+
+.sl-markdown-content table {
+  font-size: 0.92rem;
+}
+.sl-markdown-content th {
+  background: var(--sl-color-gray-7);
+  color: var(--sl-color-white);
+  font-weight: 700;
+}
+
+.sl-markdown-content img {
+  border-radius: 12px;
+}
+
+/* Buttons are rounded like the logo's regions. */
+.sl-link-button {
+  border-radius: 999px;
+  font-weight: 650;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sl-color-text-accent);
+  outline-offset: 2px;
+}
+
+.sl-link-button.primary {
+  background: var(--sl-color-accent);
+  border-color: var(--sl-color-accent);
+}
+
+/* The landing page, below the hero. */
+.sl-markdown-content .wm-landing > section {
+  margin-top: 5rem;
+}
+.sl-markdown-content .wm-landing > section:first-child {
+  margin-top: 0.5rem;
+}
+.sl-markdown-content .wm-landing h2 {
+  margin-top: 0;
+  font-family: var(--wm-font-display);
+  font-weight: 700;
+  font-size: clamp(1.45rem, 1.15rem + 1vw, 1.95rem);
+  letter-spacing: -0.035em;
+}
+.sl-markdown-content .wm-landing section > p {
+  max-width: 42em;
+}
+.sl-markdown-content .wm-landing .expressive-code {
+  margin-top: 1.75rem;
+}
+.sl-markdown-content .wm-feature-grid {
+  display: grid;
+  gap: 2.25rem 2.5rem;
+  margin-top: 2rem;
+}
+.sl-markdown-content .wm-feature-grid > div {
+  margin: 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--sl-color-hairline-light);
+}
+.sl-markdown-content .wm-feature-grid h3 {
+  margin: 0 0 0.45rem;
+  font-size: 1.12rem;
+}
+.sl-markdown-content .wm-feature-grid p {
+  margin: 0;
+  color: var(--sl-color-gray-2);
+}
+.sl-markdown-content .wm-start-here .wm-start {
+  margin-top: 1.5rem;
+}
+@media (min-width: 40rem) {
+  .sl-markdown-content .wm-feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 64rem) {
+  .sl-markdown-content .wm-feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
