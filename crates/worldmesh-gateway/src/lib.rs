@@ -2,14 +2,14 @@
 //!
 //! - A player's inputs and commands go to their entity (`entity.<id>`): the bus delivers them
 //!   to whichever Server Entity Group simulates it, wherever that is. They arrive as JSON, are
-//!   checked against the game's types, and travel on as MessagePack.
+//!   checked against the world's input and command types, and travel on as MessagePack.
 //! - Every tick it tells the Spatial Layer Cells where each player is looking, and puts each
 //!   player's snapshot together from what those cells send back. A player's view can cover the
 //!   areas of several cells; the gateway merges their parts.
 //! - Joins go to the orchestrator (it picks the group); leaves go to every group.
 //!
-//! The gateway runs only the game's [`Game::welcome`] and [`Game::join`]; views and events
-//! pass through as bytes (decoded to JSON only for players who asked for JSON snapshots).
+//! The gateway runs no game code but the world's join function. Components and events pass
+//! through as bytes (decoded to JSON, by name, only for players who asked for JSON snapshots).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -24,17 +24,15 @@ use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use serde_bytes::ByteBuf;
-use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, Notify};
 use tracing::{debug, info, warn};
 
 use worldmesh_core::config::WorldConfig;
-use worldmesh_sim::game::Game;
+use worldmesh_sim::world::Rules;
 use worldmesh_core::protocol::{
     Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, GroupCommand, GroupCommandKind,
     JoinRequest, Kind, ProcessStats, SenseDebug, ServerMsg, SnapshotEntity, SpatialViews, StreamKind, StreamMsg, ViewEntity,
-    Viewer, Viewers,
+    Viewer, Viewers, WireEvent,
 };
 use crate::snapshot::Encoder;
 use worldmesh_core::subjects::{entity_subject, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, STATS, VIEWERS, VIEWS};
@@ -81,13 +79,12 @@ struct Client {
     encoder: Encoder,
 }
 
-struct AppState<G: Game> {
+#[derive(Clone)]
+struct AppState {
     nats: async_nats::Client,
-    game: Arc<G>,
+    rules: Arc<Rules>,
     config: WorldConfig,
     options: GatewayOptions,
-    /// What the game sends every player on connect.
-    welcome: Value,
     /// Encoded messages for every player (assignment changes and stats).
     out: broadcast::Sender<Bytes>,
     next_id: Arc<AtomicU32>,
@@ -96,25 +93,9 @@ struct AppState<G: Game> {
     clients: Arc<Mutex<BTreeMap<EntityId, Client>>>,
 }
 
-impl<G: Game> Clone for AppState<G> {
-    fn clone(&self) -> Self {
-        Self {
-            nats: self.nats.clone(),
-            game: self.game.clone(),
-            config: self.config,
-            options: self.options.clone(),
-            welcome: self.welcome.clone(),
-            out: self.out.clone(),
-            next_id: self.next_id.clone(),
-            ownership: self.ownership.clone(),
-            clients: self.clients.clone(),
-        }
-    }
-}
-
 /// A gateway process.
-pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, options: GatewayOptions) -> Result<()> {
-    let config = game.config();
+pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOptions) -> Result<()> {
+    let config = rules.config;
     let (out, _) = broadcast::channel::<Bytes>(64);
     let ownership = Arc::new(Mutex::new(None::<Bytes>));
     let clients: Arc<Mutex<BTreeMap<EntityId, Client>>> = Arc::default();
@@ -207,6 +188,7 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, options: Gatew
     // player's snapshot together and send it.
     {
         let (latest, clients, reports, in_use, nats) = (latest.clone(), clients.clone(), reports.clone(), in_use.clone(), nats.clone());
+        let rules = rules.clone();
         tokio::spawn(async move {
             // Last tick each cell's events were forwarded for, so none goes out twice.
             let mut forwarded: BTreeMap<u32, u64> = BTreeMap::new();
@@ -280,10 +262,9 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, options: Gatew
                     let (senses, bus, streams) =
                         if client.debug { (&senses[..], &bus[..], &streams[..]) } else { (&[][..], &[][..], &[][..]) };
                     let encoded = if client.compact {
-                        let events: Vec<&[u8]> = events.iter().map(|e| e.as_slice()).collect();
                         client.encoder.encode(player, tick, &entities, &events, senses, bus, streams)
                     } else {
-                        json_snapshot(tick, &entities, &events, senses, bus, streams)
+                        json_snapshot(&rules, tick, &entities, &events, senses, bus, streams)
                     };
                     let _ = client.tx.send(Bytes::from(encoded));
                 }
@@ -293,8 +274,7 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, options: Gatew
 
     let state = AppState {
         nats,
-        welcome: serde_json::to_value(game.welcome())?,
-        game,
+        rules,
         config,
         options: options.clone(),
         out,
@@ -304,7 +284,7 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, options: Gatew
     };
 
     let app = Router::new()
-        .route("/ws", get(ws_handler::<G>))
+        .route("/ws", get(ws_handler))
         .route("/health", get(|| async { "ok" }))
         .with_state(state);
 
@@ -314,11 +294,13 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, options: Gatew
     Ok(())
 }
 
-/// A snapshot as JSON, with the game's views and events decoded from MessagePack.
+/// A snapshot as JSON: each entity's kind and components, and each event, by name, decoded
+/// from MessagePack.
 fn json_snapshot(
+    rules: &Rules,
     tick: u64,
     entities: &[ViewEntity],
-    events: &[ByteBuf],
+    events: &[WireEvent],
     senses: &[SenseDebug],
     bus: &[worldmesh_core::protocol::BusMsg],
     streams: &[StreamMsg],
@@ -332,26 +314,36 @@ fn json_snapshot(
             group: e.group,
             spatial: e.spatial,
             player: e.player,
-            view: codec::bytes_to_json(&e.view),
+            kind: rules.kind_name(e.kind).to_string(),
+            view: e
+                .parts
+                .iter()
+                .filter_map(|(c, bytes)| Some((rules.component(*c)?.name.to_string(), codec::bytes_to_json(bytes))))
+                .collect::<serde_json::Map<_, _>>()
+                .into(),
         })
         .collect();
-    let events = events.iter().map(|e| codec::bytes_to_json(e)).collect();
+    let events = events
+        .iter()
+        .filter_map(|e| Some(serde_json::json!({ "name": rules.message(e.msg)?.name, "data": codec::bytes_to_json(&e.body) })))
+        .collect();
     let msg = ServerMsg::Snapshot { tick, entities, events, senses: senses.to_vec(), bus: bus.to_vec(), streams: streams.to_vec() };
     serde_json::to_vec(&msg).unwrap_or_default()
 }
 
-async fn ws_handler<G: Game>(ws: WebSocketUpgrade, State(state): State<AppState<G>>) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
-/// Where the game puts a joining player, as a join request for the orchestrator.
-fn join_request<G: Game>(game: &G, id: EntityId) -> Option<JoinRequest> {
-    let spawn = game.join(id);
-    let data = codec::to_bytes(&spawn.data)?;
-    Some(JoinRequest { id, x: spawn.x, y: spawn.y, data })
+/// Where and as what the world's join function puts a joining player, as a join request for
+/// the orchestrator.
+fn join_request(rules: &Rules, id: EntityId) -> Option<JoinRequest> {
+    let spawn = rules.join(id);
+    let (kind, parts) = rules.encode_spawn(&spawn)?;
+    Some(JoinRequest { id, x: spawn.x, y: spawn.y, kind, parts })
 }
 
-async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
+async fn handle_socket(socket: WebSocket, state: AppState) {
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let (mut sender, mut receiver) = socket.split();
 
@@ -360,7 +352,8 @@ async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
         tick_ms: time::tick_ms(),
         world: state.config,
         pos_scale: state.config.pos_scale(),
-        game: state.welcome.clone(),
+        game: state.rules.welcome().clone(),
+        schema: state.rules.schema(),
     };
     let Ok(welcome) = serde_json::to_vec(&welcome) else { return };
     stats::WS_OUT.add(welcome.len());
@@ -375,8 +368,8 @@ async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
         }
     }
 
-    let Some(join) = join_request(&*state.game, id) else {
-        warn!(id, "the game's join data couldn't be encoded");
+    let Some(join) = join_request(&state.rules, id) else {
+        warn!(id, "the world's join function gave an unknown kind, or a component that couldn't be encoded");
         return;
     };
     let mut broadcasts = state.out.subscribe();
@@ -430,7 +423,7 @@ async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
                 missing_checks = if present { 0 } else { missing_checks + 1 };
                 if missing_checks >= REJOIN_AFTER_CHECKS {
                     warn!(id, "player missing from their own view, re-joining");
-                    if let Some(join) = join_request(&*state.game, id) {
+                    if let Some(join) = join_request(&state.rules, id) {
                         bus::publish(&state.nats, JOINS.to_string(), &join).await;
                     }
                     missing_checks = 0;
@@ -453,11 +446,6 @@ async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
     info!(id, "player disconnected");
 }
 
-/// The game's value from a player, checked against its type and encoded for the bus.
-fn transcode<T: worldmesh_sim::game::Wire>(value: Value) -> Result<Vec<u8>, String> {
-    let typed: T = serde_json::from_value(value).map_err(|e| e.to_string())?;
-    codec::to_bytes(&typed).ok_or_else(|| "couldn't encode".into())
-}
 
 /// When an input for (`tick`, `sub`) should take effect. Groups have already simulated tick
 /// `now`; `now + 1` is the earliest tick an input can still change. Tick 0 (or anything
@@ -479,10 +467,10 @@ fn early_ms(tick: u64, sub: u8, substeps: u8, now_ms: u64) -> i64 {
 }
 
 /// Handle one message from a player; returns a reply for that player only, if any.
-async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8]) -> Option<ServerMsg> {
+async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option<ServerMsg> {
     match serde_json::from_slice::<ClientMsg>(raw) {
         Ok(ClientMsg::Input { tick, sub, input }) => {
-            let input = match transcode::<G::Input>(input) {
+            let input = match state.rules.input_from_json(input) {
                 Ok(bytes) => bytes,
                 Err(err) => {
                     warn!(id, %err, "dropping an input the game doesn't understand");
@@ -499,17 +487,17 @@ async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8
             let early = if tick == 0 { 0 } else { early_ms(tick, sub, substeps, now_ms) };
             Some(ServerMsg::InputAck { tick, sub, early_ms: early })
         }
-        Ok(ClientMsg::Command { command }) => {
+        Ok(ClientMsg::Command { name, command }) => {
             // Addressed to the player's own entity: the bus delivers it to whichever group
-            // simulates them now, and the game decides what it does.
-            let command = match transcode::<G::Command>(command) {
-                Ok(bytes) => bytes,
+            // simulates them now, and the world's handlers decide what it does.
+            let (msg, body) = match state.rules.command_from_json(&name, command) {
+                Ok(encoded) => encoded,
                 Err(err) => {
-                    warn!(id, %err, "dropping a command the game doesn't understand");
+                    warn!(id, %name, %err, "dropping a command the world doesn't understand");
                     return None;
                 }
             };
-            let env = from_player(id, Kind::Command { command }, true);
+            let env = from_player(id, Kind::Command { msg, body }, true);
             bus::publish(&state.nats, entity_subject(id), &env).await;
             None
         }
@@ -542,15 +530,17 @@ async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_bytes::ByteBuf;
+    use serde_json::Value;
     use worldmesh_core::protocol::CellView;
-    use serde::{Deserialize, Serialize};
+    use worldmesh_sim::test_game::{self, Health, Hurt};
 
     fn entity(id: u32, x: f32, spatial: u32) -> ViewEntity {
-        ViewEntity { id, x, y: 1.0, group: 1, spatial, player: true, view: vec![0x90] }
+        ViewEntity { id, x, y: 1.0, group: 1, spatial, player: true, kind: 0, parts: Vec::new() }
     }
 
     fn cell(spatial: u32, tick: u64, player: u32, entities: Vec<ViewEntity>, events: Vec<&[u8]>) -> SpatialViews {
-        let events = events.into_iter().map(|e| ByteBuf::from(e.to_vec())).collect();
+        let events = events.into_iter().map(|e| WireEvent { msg: 0, body: e.to_vec() }).collect();
         SpatialViews { spatial, tick, views: vec![CellView { player, entities, events, senses: Vec::new() }] }
     }
 
@@ -571,29 +561,39 @@ mod tests {
     }
 
     #[test]
-    fn json_snapshots_decode_the_games_views_and_events() {
+    fn json_snapshots_name_kinds_components_and_events() {
+        let rules = test_game::rules();
+        let health = rules.component_id::<Health>().unwrap();
         let mut e = entity(4, 2.0, 0x8001);
-        e.view = codec::to_bytes(&serde_json::json!({ "hp": 90, "name": "Ann" })).unwrap();
-        let event = ByteBuf::from(codec::to_bytes(&serde_json::json!({ "k": "hurt", "amount": 10 })).unwrap());
-        let bytes = json_snapshot(55, &[e], &[event], &[], &[], &[]);
+        e.parts = vec![(health, ByteBuf::from(codec::to_bytes(&Health(90)).unwrap()))];
+        let event = WireEvent { msg: rules.message_id::<Hurt>().unwrap(), body: codec::to_bytes(&Hurt { id: 4, hp: 90 }).unwrap() };
+        let bytes = json_snapshot(&rules, 55, &[e], &[event], &[], &[], &[]);
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["t"], "snapshot");
-        assert_eq!(v["entities"][0]["view"]["name"], "Ann");
-        assert_eq!(v["events"][0]["amount"], 10);
-    }
-
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    #[serde(tag = "k", rename_all = "snake_case")]
-    enum Cmd {
-        Use { ability: u8, x: f32 },
+        assert_eq!(v["entities"][0]["kind"], "unit");
+        assert_eq!(v["entities"][0]["view"]["health"], 90);
+        assert_eq!(v["events"][0]["name"], "hurt");
+        assert_eq!(v["events"][0]["data"]["hp"], 90);
     }
 
     #[test]
-    fn player_values_are_checked_against_the_games_types() {
-        let ok = transcode::<Cmd>(serde_json::json!({ "k": "use", "ability": 2, "x": 1.5 })).unwrap();
-        assert_eq!(codec::from_bytes::<Cmd>(&ok), Some(Cmd::Use { ability: 2, x: 1.5 }));
-        assert!(transcode::<Cmd>(serde_json::json!({ "k": "teleport" })).is_err());
-        assert!(transcode::<Cmd>(serde_json::json!({ "k": "use", "ability": 300, "x": 1.0 })).is_err(), "out of range");
+    fn player_values_are_checked_against_the_worlds_types() {
+        let rules = test_game::rules();
+        let (msg, body) = rules.command_from_json("command", serde_json::json!({ "Hit": { "target": 2 } })).unwrap();
+        assert_eq!(rules.message(msg).unwrap().name, "command");
+        assert!(matches!(codec::from_bytes::<test_game::Command>(&body), Some(test_game::Command::Hit { target: 2 })));
+        assert!(rules.command_from_json("command", serde_json::json!({ "Teleport": {} })).is_err());
+        assert!(rules.command_from_json("dance", serde_json::json!(null)).is_err(), "not a command");
+        assert!(rules.command_from_json("damage", serde_json::json!(5)).is_err(), "an action, not a command");
+        assert!(rules.input_from_json(serde_json::json!({ "dx": 1.0, "dy": 0.0 })).is_ok());
+        assert!(rules.input_from_json(serde_json::json!({ "dx": "east" })).is_err());
+    }
+
+    #[test]
+    fn a_join_uses_the_worlds_join_function() {
+        let rules = test_game::rules();
+        let join = join_request(&rules, 3).unwrap();
+        assert_eq!((join.id, join.x, join.y, rules.kind_name(join.kind)), (3, 10.5, 10.5, "unit"));
     }
 
     #[test]

@@ -16,6 +16,26 @@ pub type EntityId = u32;
 /// A Server Entity Group's id (or a Spatial Layer Cell's, see [`crate::subjects::is_spatial_id`]).
 pub type GroupId = u32;
 
+/// One component of an entity, encoded: (component id, MessagePack). Ids index the world's
+/// [`Schema::components`].
+pub type Part = (u16, serde_bytes::ByteBuf);
+
+/// The names behind the ids used on the wire, in id order. Sent to every player on connect.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Schema {
+    pub components: Vec<String>,
+    pub messages: Vec<String>,
+    pub kinds: Vec<String>,
+}
+
+/// A game event, encoded: which message it is, and its body (MessagePack).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WireEvent {
+    pub msg: u16,
+    #[serde(with = "serde_bytes")]
+    pub body: Vec<u8>,
+}
+
 /// Ids from here up are for entities the game spawns; below are players'.
 pub const SPAWNED_ID_START: EntityId = 1 << 31;
 
@@ -33,9 +53,9 @@ pub enum ClientMsg {
         sub: u8,
         input: Value,
     },
-    /// The game's command (a discrete request, like "use this ability"), handled by the
-    /// player's own entity on the next tick.
-    Command { command: Value },
+    /// One of the game's commands, by name (a discrete request, like "use this ability"),
+    /// handled by the player's own entity on the next tick.
+    Command { name: String, command: Value },
     /// How this player wants snapshots: `compact` = binary, only what changed; `debug` =
     /// include debug traffic (for the debug panel's bus view and overlays).
     Settings {
@@ -71,14 +91,16 @@ pub enum ServerMsg {
         world: WorldConfig,
         /// Other entities' positions in optimized snapshots are `u16` steps of `1 / pos_scale`.
         pos_scale: f32,
-        /// Whatever the game sends every player on connect (`Game::welcome`).
+        /// What the game sends every player on connect (`World::welcome`), by key.
         game: Value,
+        /// The names of the world's components, messages and kinds, in id order.
+        schema: Schema,
     },
     /// What this player can see this tick, plus debug traffic if they asked for it.
     Snapshot {
         tick: u64,
         entities: Vec<SnapshotEntity>,
-        /// The game's events on this player's screen this tick.
+        /// The game's events on this player's screen this tick: `{"name": ..., "data": ...}`.
         #[serde(default)]
         events: Vec<Value>,
         #[serde(default)]
@@ -113,7 +135,9 @@ pub struct SnapshotEntity {
     pub spatial: GroupId,
     /// Controlled by a connected player.
     pub player: bool,
-    /// The game's view of it (`Game::view`).
+    /// Its kind's name.
+    pub kind: String,
+    /// Its visible components, by name.
     pub view: Value,
 }
 
@@ -310,15 +334,17 @@ pub struct DebugCommand {
     pub set_lag: Option<(GroupId, u32)>,
 }
 
-/// Gateway -> orchestrator: a player connected. Where they appear and their starting data
-/// come from the game (`Game::join`).
+/// Gateway -> orchestrator: a player connected. Where they appear and as what come from the
+/// world's join function.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinRequest {
     pub id: EntityId,
     pub x: f32,
     pub y: f32,
-    #[serde(with = "serde_bytes")]
-    pub data: Vec<u8>,
+    pub kind: u16,
+    /// Components on top of the kind's.
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }
 
 /// Group -> orchestrator: the game spawned entities. The orchestrator gives them ids and
@@ -357,9 +383,10 @@ pub struct NewEntity {
     pub y: f32,
     #[serde(default)]
     pub player: bool,
-    /// The game's data for it, encoded.
-    #[serde(with = "serde_bytes")]
-    pub data: Vec<u8>,
+    pub kind: u16,
+    /// Components on top of the kind's.
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }
 
 // ---- Envelopes: anything aimed at something ----
@@ -426,13 +453,15 @@ pub enum Kind {
     },
     /// A player's command (from the gateway), for their own entity only.
     Command {
+        msg: u16,
         #[serde(with = "serde_bytes")]
-        command: Vec<u8>,
+        body: Vec<u8>,
     },
     /// The game's action, from one entity to its address.
     Action {
+        msg: u16,
         #[serde(with = "serde_bytes")]
-        action: Vec<u8>,
+        body: Vec<u8>,
     },
 }
 
@@ -446,9 +475,10 @@ pub struct Reported {
     pub y: f32,
     #[serde(default)]
     pub player: bool,
-    /// The game's view of it, encoded (MessagePack, with field names).
-    #[serde(with = "serde_bytes")]
-    pub view: Vec<u8>,
+    pub kind: u16,
+    /// Its visible components.
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }
 
 /// A game event and where it happened.
@@ -456,8 +486,9 @@ pub struct Reported {
 pub struct EventAt {
     pub x: f32,
     pub y: f32,
+    pub msg: u16,
     #[serde(with = "serde_bytes")]
-    pub event: Vec<u8>,
+    pub body: Vec<u8>,
     /// Players who get it wherever they are (besides everyone who can see (x, y)).
     #[serde(default)]
     pub involves: Vec<EntityId>,
@@ -479,7 +510,7 @@ pub struct GroupReport {
     pub events: Vec<EventAt>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SenseQuery {
     /// The entity asking.
     pub id: EntityId,
@@ -492,6 +523,9 @@ pub struct SenseQuery {
     /// Always include this one if it's in the circle.
     #[serde(default)]
     pub target: Option<EntityId>,
+    /// Only these visible components in the answer (None: all of them).
+    #[serde(default)]
+    pub only: Option<Vec<u16>>,
 }
 
 /// Another entity, as a Spatial Layer Cell describes it.
@@ -503,8 +537,10 @@ pub struct Seen {
     pub group: GroupId,
     #[serde(default)]
     pub player: bool,
-    #[serde(with = "serde_bytes")]
-    pub view: Vec<u8>,
+    pub kind: u16,
+    /// Its visible components (those the question asked for).
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }
 
 /// Spatial Layer Cell -> group: answers to last tick's questions.
@@ -547,8 +583,10 @@ pub struct ViewEntity {
     pub spatial: GroupId,
     #[serde(default)]
     pub player: bool,
-    #[serde(with = "serde_bytes")]
-    pub view: Vec<u8>,
+    pub kind: u16,
+    /// Its visible components.
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }
 
 /// Spatial Layer Cell -> gateway, every tick.
@@ -565,7 +603,7 @@ pub struct CellView {
     pub player: EntityId,
     pub entities: Vec<ViewEntity>,
     #[serde(default)]
-    pub events: Vec<serde_bytes::ByteBuf>,
+    pub events: Vec<WireEvent>,
     #[serde(default)]
     pub senses: Vec<SenseDebug>,
 }

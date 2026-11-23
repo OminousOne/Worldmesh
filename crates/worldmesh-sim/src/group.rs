@@ -7,8 +7,8 @@
 //!
 //! Each tick a group:
 //! 1. delivers last tick's commands and actions (to an entity, an area or everyone) in a fixed
-//!    order, by calling the game's `on_command` / `on_action`,
-//! 2. calls the game's `tick` once per entity, with that entity's player inputs due this tick,
+//!    order, to every handler registered for them,
+//! 2. runs the systems, stage by stage, for every entity (with its player's inputs due this tick),
 //! 3. reports its entities (and their questions, and events) to the Spatial Layer Cells whose
 //!    areas they stand in, hands off what it was told to, and publishes its envelopes.
 //!
@@ -23,12 +23,13 @@ use anyhow::Result;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
-use worldmesh_core::codec;
 use worldmesh_core::config::WorldConfig;
-use crate::game::{Entity, Game, Incoming, Me, Meta, Record, Requests, Sensed, Timed};
+use crate::entity::{Entity, Meta, Record};
+use crate::me::{Incoming, Me, Requests};
+use crate::world::Rules;
 use worldmesh_core::protocol::{
     Address, Assignment, BusKind, BusMsg, DebugReport, EntityId, Envelope, EventAt, Facts, GroupCommand, GroupCommandKind,
-    GroupId, GroupReport, Heartbeat, HostCommand, Kind, NewEntity, ProcessStats, Reported, SenseAnswers, SenseQuery,
+    GroupId, GroupReport, Heartbeat, HostCommand, Kind, NewEntity, ProcessStats, Reported, Seen, SenseAnswers, SenseQuery,
     SpawnRequest, StreamKind, StreamMsg,
 };
 use worldmesh_core::subjects::{
@@ -51,6 +52,8 @@ const MAX_HOPS: u8 = 3;
 
 /// A player's inputs not simulated yet: (tick, sub-step) -> (sequence number, input).
 type Schedule = BTreeMap<(u64, u8), (u64, Vec<u8>)>;
+/// Inputs due this tick: (sub-step, input).
+type Due = Vec<(u8, Vec<u8>)>;
 
 /// What one group did since its last stats report.
 #[derive(Default)]
@@ -68,27 +71,27 @@ pub struct Counters {
     pub ticks: u64,
 }
 
-/// One Server Entity Group's world: its entities and everything in flight for them.
 /// One entity's latest answer to "what's near me?": (tick of the positions, what it saw).
-type SenseRound<V> = (u64, Vec<Sensed<V>>);
+type SenseRound = (u64, Vec<Seen>);
 
-pub struct GroupWorld<G: Game> {
+/// One Server Entity Group's world: its entities and everything in flight for them.
+pub struct GroupWorld {
     pub group_id: GroupId,
-    game: Arc<G>,
+    rules: Arc<Rules>,
     config: WorldConfig,
     /// Spatial Layer Cell owning each chunk. None until the first assignment arrives.
     owners: Option<Vec<GroupId>>,
     /// Spatial Layer Cells in use: every one gets a report every tick.
     spatial: Vec<GroupId>,
     /// Entities simulated here. A BTreeMap so iteration order is deterministic.
-    entities: BTreeMap<EntityId, Record<G::Data>>,
+    entities: BTreeMap<EntityId, Record>,
     schedule: BTreeMap<EntityId, Schedule>,
     /// Players who disconnected. Late handoffs and spawns for them are dropped.
     left: BTreeSet<EntityId>,
     /// Entities handed off recently: (new group, until this tick). Envelopes for them are forwarded.
     moved: BTreeMap<EntityId, (GroupId, u64)>,
     /// Each entity's latest answer to "what's near me?": (tick of the positions, what it saw).
-    senses: BTreeMap<EntityId, SenseRound<G::View>>,
+    senses: BTreeMap<EntityId, SenseRound>,
     /// Questions asked this tick, sent with the reports.
     queries: Vec<SenseQuery>,
     /// Entities the orchestrator asked us to hand off: (entity, new group).
@@ -108,12 +111,12 @@ pub struct GroupWorld<G: Game> {
     pub counters: Counters,
 }
 
-impl<G: Game> GroupWorld<G> {
-    pub fn new(group_id: GroupId, game: Arc<G>) -> Self {
-        let config = game.config();
+impl GroupWorld {
+    pub fn new(group_id: GroupId, rules: Arc<Rules>) -> Self {
+        let config = rules.config;
         Self {
             group_id,
-            game,
+            rules,
             config,
             owners: None,
             spatial: Vec::new(),
@@ -161,12 +164,12 @@ impl<G: Game> GroupWorld<G> {
     }
 
     /// Every entity this group simulates.
-    pub fn entities(&self) -> impl Iterator<Item = &Entity<G::Data>> {
+    pub fn entities(&self) -> impl Iterator<Item = &Entity> {
         self.entities.values().map(|r| &r.entity)
     }
 
     /// An entity simulated here (for tests and tools).
-    pub fn entity(&self, id: EntityId) -> Option<&Entity<G::Data>> {
+    pub fn entity(&self, id: EntityId) -> Option<&Entity> {
         self.entities.get(&id).map(|r| &r.entity)
     }
 
@@ -181,11 +184,13 @@ impl<G: Game> GroupWorld<G> {
                     if self.left.contains(&n.id) || self.entities.contains_key(&n.id) {
                         continue;
                     }
-                    let Some(data) = codec::from_bytes::<G::Data>(&n.data) else { continue };
+                    let Some(entity) = self.rules.new_entity(n.id, n.x, n.y, n.player, n.kind, &n.parts) else {
+                        tracing::warn!(id = n.id, kind = n.kind, "couldn't create an entity (unknown kind or component)");
+                        continue;
+                    };
                     if n.player {
                         info!(id = n.id, x = n.x, y = n.y, "player joined");
                     }
-                    let entity = Entity { id: n.id, x: n.x, y: n.y, player: n.player, data };
                     self.entities.insert(n.id, Record { entity, meta: Meta::default() });
                 }
             }
@@ -252,7 +257,7 @@ impl<G: Game> GroupWorld<G> {
     }
 
     fn receive_handoff(&mut self, bytes: &[u8]) {
-        let Some(mut record) = codec::from_bytes::<Record<G::Data>>(bytes) else { return };
+        let Some(mut record) = Record::decode(&self.rules, bytes) else { return };
         let id = record.entity.id;
         if self.left.contains(&id) {
             return;
@@ -271,14 +276,7 @@ impl<G: Game> GroupWorld<G> {
             if !self.entities.contains_key(&answer.id) {
                 continue;
             }
-            let seen: Vec<Sensed<G::View>> = answer
-                .seen
-                .into_iter()
-                .filter_map(|s| {
-                    let view = codec::from_bytes::<G::View>(&s.view)?;
-                    Some(Sensed { id: s.id, x: s.x, y: s.y, group: s.group, player: s.player, view })
-                })
-                .collect();
+            let seen = answer.seen;
             let entry = self.senses.entry(answer.id).or_insert((0, Vec::new()));
             if answers.tick > entry.0 {
                 *entry = (answers.tick, seen);
@@ -291,20 +289,14 @@ impl<G: Game> GroupWorld<G> {
         }
     }
 
-    /// Every player's inputs due during `tick`, decoded, in order. Inputs meant for ticks
-    /// already simulated (they arrived late) take effect at the start of this one.
-    fn take_due_inputs(&mut self, tick: u64) -> BTreeMap<EntityId, Vec<Timed<G::Input>>> {
+    /// Every player's inputs due during `tick`, in order. Inputs meant for ticks already
+    /// simulated (they arrived late) take effect at the start of this one.
+    fn take_due_inputs(&mut self, tick: u64) -> BTreeMap<EntityId, Due> {
         let mut due = BTreeMap::new();
         for (&id, inputs) in self.schedule.iter_mut() {
             let later = inputs.split_off(&(tick + 1, 0));
             let now = std::mem::replace(inputs, later);
-            let list: Vec<Timed<G::Input>> = now
-                .into_iter()
-                .filter_map(|((at, sub), (_, bytes))| {
-                    let input = codec::from_bytes::<G::Input>(&bytes)?;
-                    Some(Timed { sub: if at < tick { 0 } else { sub }, input })
-                })
-                .collect();
+            let list: Due = now.into_iter().map(|((at, sub), (_, bytes))| (if at < tick { 0 } else { sub }, bytes)).collect();
             if !list.is_empty() {
                 due.insert(id, list);
             }
@@ -322,21 +314,21 @@ impl<G: Game> GroupWorld<G> {
         self.senses.retain(|_, (t, _)| *t + ttl >= tick);
     }
 
-    /// Run `f` on entity `id` with a [`Me`] for it, then carry out what the game asked for.
-    /// False if the entity isn't here (or the game despawned it).
-    fn with_me(&mut self, id: EntityId, tick: u64, trace: u64, f: impl FnOnce(&G, &mut Me<'_, G>)) -> bool {
+    /// Run `f` on entity `id` with a [`Me`] for it, then carry out what game code asked for.
+    /// False if the entity isn't here (or was despawned).
+    fn with_me(&mut self, id: EntityId, tick: u64, trace: u64, inputs: &[(u8, Vec<u8>)], f: impl FnOnce(&mut Me<'_>)) -> bool {
         let Some(mut record) = self.entities.remove(&id) else { return false };
-        let game = self.game.clone();
-        let mut requests = Requests::<G>::default();
+        let rules = self.rules.clone();
+        let mut requests = Requests::default();
         let mut despawned = false;
         {
-            let sensed: &[Sensed<G::View>] = match self.senses.get(&id) {
+            let sensed: &[Seen] = match self.senses.get(&id) {
                 Some((_, s)) => s,
                 None => &[],
             };
             let Record { entity, meta } = &mut record;
             let mut me = Me {
-                game: &*game,
+                rules: &rules,
                 entity,
                 meta,
                 tick,
@@ -344,10 +336,11 @@ impl<G: Game> GroupWorld<G> {
                 trace,
                 others: &self.entities,
                 sensed,
+                inputs,
                 requests: &mut requests,
                 despawned: &mut despawned,
             };
-            f(&*game, &mut me);
+            f(&mut me);
         }
         if despawned {
             self.schedule.remove(&id);
@@ -360,46 +353,46 @@ impl<G: Game> GroupWorld<G> {
         !despawned
     }
 
-    /// What the game asked for during a callback.
-    fn carry_out(&mut self, requests: Requests<G>) {
+    /// What game code asked for during a callback.
+    fn carry_out(&mut self, requests: Requests) {
         for env in requests.envelopes {
             self.route(env);
         }
-        for (x, y, event, involves) in requests.events {
-            if let Some(event) = codec::to_bytes(&event) {
-                self.events.push(EventAt { x, y, event, involves });
-            }
-        }
-        for spawn in requests.spawns {
-            if let Some(data) = codec::to_bytes(&spawn.data) {
-                self.spawns.push(NewEntity { id: 0, x: spawn.x, y: spawn.y, player: false, data });
-            }
-        }
+        self.events.extend(requests.events);
+        self.spawns.extend(requests.spawns);
         self.counters.queries += requests.queries.len() as u64;
         self.queries.extend(requests.queries);
     }
 
-    /// Every entity simulates this tick once, with its player's inputs due this tick. An
-    /// entity that arrived by handoff already simulated for this tick (the previous group
-    /// finished the tick first) is not simulated again.
+    /// Every entity simulates this tick once: each stage's systems run for every entity before
+    /// the next stage starts, with its player's inputs due this tick. An entity that arrived by
+    /// handoff already simulated for this tick (the previous group finished it first) is not
+    /// simulated again.
     fn tick_entities(&mut self, tick: u64) {
         let mut due = self.take_due_inputs(tick);
-        let ids: Vec<EntityId> = self.entities.keys().copied().collect();
-        for id in ids {
-            let Some(record) = self.entities.get(&id) else { continue }; // despawned meanwhile
-            if record.meta.last_tick >= tick {
-                continue;
-            }
-            let inputs = due.remove(&id).unwrap_or_default();
-            self.with_me(id, tick, 0, |game, me| {
-                game.tick(me, &inputs);
-                me.meta.last_tick = tick;
-                let (x, y) = (me.entity.x, me.entity.y);
-                me.meta.trail.push((tick, x, y));
-                if me.meta.trail.len() > TRAIL_TICKS {
-                    me.meta.trail.remove(0);
+        let ids: Vec<EntityId> = self.entities.iter().filter(|(_, r)| r.meta.last_tick < tick).map(|(&id, _)| id).collect();
+        let rules = self.rules.clone();
+        for stage in &rules.systems {
+            for &id in &ids {
+                let inputs = due.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+                for (only, system) in stage {
+                    let Some(record) = self.entities.get(&id) else { break }; // despawned meanwhile
+                    if only.is_some_and(|t| !record.entity.has_type(t)) {
+                        continue;
+                    }
+                    self.with_me(id, tick, 0, inputs, |me| system(me));
                 }
-            });
+            }
+        }
+        for id in ids {
+            due.remove(&id);
+            let Some(record) = self.entities.get_mut(&id) else { continue };
+            record.meta.last_tick = tick;
+            let (x, y) = (record.entity.x, record.entity.y);
+            record.meta.trail.push((tick, x, y));
+            if record.meta.trail.len() > TRAIL_TICKS {
+                record.meta.trail.remove(0);
+            }
         }
     }
 
@@ -463,7 +456,7 @@ impl<G: Game> GroupWorld<G> {
                 trace: env.trace,
             };
             match (&env.to, &env.kind) {
-                (&Address::Entity { id }, Kind::Command { command }) => {
+                (&Address::Entity { id }, Kind::Command { msg, body }) => {
                     // Only an entity's own player may command it.
                     if !self.entities.contains_key(&id) {
                         self.forward(id, env.clone());
@@ -472,10 +465,19 @@ impl<G: Game> GroupWorld<G> {
                     if env.from.id != id || !self.first_delivery(id, &env.from, env.seq) {
                         continue;
                     }
-                    let Some(command) = codec::from_bytes::<G::Command>(command) else { continue };
-                    self.with_me(id, tick, env.trace, |game, me| game.on_command(me, command));
+                    let rules = self.rules.clone();
+                    let Some(info) = rules.message(*msg) else { continue };
+                    let Some(command) = (info.decode)(body) else { continue };
+                    self.with_me(id, tick, env.trace, &[], |me| {
+                        for handler in &info.commands {
+                            if me.despawned() {
+                                break;
+                            }
+                            handler(me, &*command);
+                        }
+                    });
                 }
-                (&Address::Entity { id }, Kind::Action { action }) => {
+                (&Address::Entity { id }, Kind::Action { msg, body }) => {
                     if !self.entities.contains_key(&id) {
                         self.forward(id, env.clone());
                         continue;
@@ -483,13 +485,11 @@ impl<G: Game> GroupWorld<G> {
                     if !self.first_delivery(id, &env.from, env.seq) {
                         continue; // a duplicate (old owner forwarded what we also got directly)
                     }
-                    let Some(action) = codec::from_bytes::<G::Action>(action) else { continue };
                     self.count_delivery(&env.from);
                     let from = incoming(None, false);
-                    self.with_me(id, tick, env.trace, |game, me| game.on_action(me, action, &from));
+                    self.act(id, tick, *msg, body, &from);
                 }
-                (&Address::Area { x, y, r }, Kind::Action { action }) => {
-                    let Some(action) = codec::from_bytes::<G::Action>(action) else { continue };
+                (&Address::Area { x, y, r }, Kind::Action { msg, body }) => {
                     let inside: Vec<EntityId> = self
                         .entities
                         .values()
@@ -501,26 +501,38 @@ impl<G: Game> GroupWorld<G> {
                         // Two Spatial Layer Cells may both pass on the same area action.
                         if self.first_delivery(id, &env.from, env.seq) {
                             self.count_delivery(&env.from);
-                            let action = action.clone();
-                            self.with_me(id, tick, env.trace, |game, me| game.on_action(me, action, &from));
+                            self.act(id, tick, *msg, body, &from);
                         }
                     }
                 }
-                (Address::Everyone, Kind::Action { action }) => {
-                    let Some(action) = codec::from_bytes::<G::Action>(action) else { continue };
+                (Address::Everyone, Kind::Action { msg, body }) => {
                     let ids: Vec<EntityId> = self.entities.keys().copied().collect();
                     let from = incoming(None, true);
                     for id in ids {
                         if self.entities.contains_key(&id) && self.first_delivery(id, &env.from, env.seq) {
                             self.count_delivery(&env.from);
-                            let action = action.clone();
-                            self.with_me(id, tick, env.trace, |game, me| game.on_action(me, action, &from));
+                            self.act(id, tick, *msg, body, &from);
                         }
                     }
                 }
                 _ => {}
             }
         }
+    }
+
+    /// Run every handler registered for action `msg` on entity `id`, in order.
+    fn act(&mut self, id: EntityId, tick: u64, msg: u16, body: &[u8], from: &Incoming) {
+        let rules = self.rules.clone();
+        let Some(info) = rules.message(msg) else { return };
+        let Some(action) = (info.decode)(body) else { return };
+        self.with_me(id, tick, from.trace, &[], |me| {
+            for handler in &info.actions {
+                if me.despawned() {
+                    break;
+                }
+                handler(me, &*action, from);
+            }
+        });
     }
 
     fn count_delivery(&mut self, from: &Facts) {
@@ -570,13 +582,13 @@ impl<G: Game> GroupWorld<G> {
         for record in self.entities.values() {
             let e = &record.entity;
             let Some(report) = self.spatial_at(e.x, e.y).and_then(|s| reports.get_mut(&s)) else { continue };
-            let Some(view) = codec::to_bytes(&self.game.view(e)) else { continue };
-            report.entities.push(Reported { id: e.id, x: e.x, y: e.y, player: e.player, view });
+            let Some(parts) = self.rules.encode(e.components.iter(), true) else { continue };
+            report.entities.push(Reported { id: e.id, x: e.x, y: e.y, player: e.player, kind: e.kind, parts });
         }
         for q in std::mem::take(&mut self.queries) {
             for s in self.spatial_in_circle(q.x, q.y, q.r) {
                 if let Some(report) = reports.get_mut(&s) {
-                    report.queries.push(q);
+                    report.queries.push(q.clone());
                 }
             }
         }
@@ -603,7 +615,7 @@ impl<G: Game> GroupWorld<G> {
             self.counters.handoffs += 1;
             let e = &record.entity;
             let from = Facts { id, group: self.group_id, x: e.x, y: e.y, tick: record.meta.last_tick };
-            let Some(bytes) = codec::to_bytes(&record) else { continue };
+            let Some(bytes) = record.encode(&self.rules) else { continue };
             let env = Envelope { to: Address::Group { id: to }, from, via: self.group_id, seq: 0, trace: 0, hops: 0, kind: Kind::Handoff { entity: bytes } };
             out.push((to, env));
         }
@@ -692,8 +704,8 @@ impl LagQueue {
 // ---- The process ----
 
 /// One group in a host process: its world, its subscriptions, and its fake lag.
-struct Runner<G: Game> {
-    world: GroupWorld<G>,
+struct Runner {
+    world: GroupWorld,
     inbox: UnboundedReceiver<(Instant, Envelope)>,
     broadcast: UnboundedReceiver<(Instant, Envelope)>,
     senses: UnboundedReceiver<(Instant, SenseAnswers)>,
@@ -708,9 +720,9 @@ struct Runner<G: Game> {
     last_due: Instant,
 }
 
-impl<G: Game> Runner<G> {
-    async fn start(nats: &async_nats::Client, id: GroupId, game: Arc<G>, assignment: Option<&Assignment>) -> Result<Self> {
-        let mut world = GroupWorld::new(id, game);
+impl Runner {
+    async fn start(nats: &async_nats::Client, id: GroupId, rules: Arc<Rules>, assignment: Option<&Assignment>) -> Result<Self> {
+        let mut world = GroupWorld::new(id, rules);
         let mut lag = Duration::ZERO;
         if let Some(a) = assignment {
             world.set_assignment(a);
@@ -845,19 +857,19 @@ fn lag_of(a: &Assignment, group: GroupId) -> Duration {
 }
 
 /// A group host process: runs its first group, then whatever groups the orchestrator starts here.
-pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, first_group: Option<GroupId>) -> Result<()> {
+pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, first_group: Option<GroupId>) -> Result<()> {
     let host_id = random_process_id(false);
     let first = first_group.filter(|&id| id != 0 && !worldmesh_core::subjects::is_spatial_id(id)).unwrap_or_else(|| random_process_id(false));
     let mut assignment: Option<Assignment> = None;
-    let mut runners: BTreeMap<GroupId, Runner<G>> = BTreeMap::new();
-    runners.insert(first, Runner::start(&nats, first, game.clone(), None).await?);
+    let mut runners: BTreeMap<GroupId, Runner> = BTreeMap::new();
+    runners.insert(first, Runner::start(&nats, first, rules.clone(), None).await?);
 
     let mut assignments = bus::subscribe::<Assignment>(&nats, ASSIGNMENTS).await?;
     let mut commands = bus::subscribe_timed::<GroupCommand>(&nats, GROUP_COMMANDS).await?;
     let mut hosts = bus::subscribe::<HostCommand>(&nats, HOST_COMMANDS).await?;
     stats::spawn_reporter(nats.clone(), "group-host", host_id);
     info!(process = format!("{host_id:04x}"), tick_ms = time::tick_ms(), "group process running");
-    let heartbeat = |runners: &BTreeMap<GroupId, Runner<G>>| Heartbeat {
+    let heartbeat = |runners: &BTreeMap<GroupId, Runner>| Heartbeat {
         role: "host".into(),
         id: host_id,
         groups: runners.keys().copied().collect(),
@@ -889,7 +901,7 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, first_group: O
             }
             for id in cmd.start {
                 if let std::collections::btree_map::Entry::Vacant(slot) = runners.entry(id) {
-                    slot.insert(Runner::start(&nats, id, game.clone(), assignment.as_ref()).await?);
+                    slot.insert(Runner::start(&nats, id, rules.clone(), assignment.as_ref()).await?);
                 }
             }
             for id in cmd.stop {

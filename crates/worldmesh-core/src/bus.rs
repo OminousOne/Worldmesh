@@ -205,11 +205,12 @@ mod tests {
     fn every_kind_of_bus_message_survives_both_encodings() {
         let facts = Facts { id: 5, group: 2, x: 1.5, y: 2.5, tick: 99 };
         let bytes = vec![0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0xc3];
+        let parts = vec![(0, serde_bytes::ByteBuf::from(bytes.clone())), (2, serde_bytes::ByteBuf::from(vec![0x05]))];
         let envelopes = [
             Envelope { to: Address::Entity { id: 9 }, from: facts, via: 2, seq: 1, trace: 4, hops: 0, kind: Kind::Input { at_tick: 100, sub: 2, input: bytes.clone() } },
-            Envelope { to: Address::Area { x: 3.0, y: 4.0, r: 2.5 }, from: facts, via: 2, seq: 2, trace: 5, hops: 1, kind: Kind::Action { action: bytes.clone() } },
+            Envelope { to: Address::Area { x: 3.0, y: 4.0, r: 2.5 }, from: facts, via: 2, seq: 2, trace: 5, hops: 1, kind: Kind::Action { msg: 3, body: bytes.clone() } },
             Envelope { to: Address::Group { id: 4 }, from: facts, via: 3, seq: 4, trace: 7, hops: 0, kind: Kind::Handoff { entity: bytes.clone() } },
-            Envelope { to: Address::Everyone, from: facts, via: 3, seq: 5, trace: 8, hops: 0, kind: Kind::Command { command: bytes.clone() } },
+            Envelope { to: Address::Everyone, from: facts, via: 3, seq: 5, trace: 8, hops: 0, kind: Kind::Command { msg: 1, body: bytes.clone() } },
         ];
         for env in &envelopes {
             round_trip(env);
@@ -217,24 +218,24 @@ mod tests {
         let report = GroupReport {
             group: 3,
             tick: 1000,
-            entities: (0..50).map(|id| Reported { id, x: 12.25 + id as f32, y: 30.5, player: id % 2 == 0, view: bytes.clone() }).collect(),
-            queries: vec![SenseQuery { id: 1, x: 2.0, y: 3.0, r: 6.0, nearest: 8, target: Some(4) }],
-            events: vec![EventAt { x: 1.0, y: 2.0, event: bytes.clone(), involves: vec![1] }],
+            entities: (0..50).map(|id| Reported { id, x: 12.25 + id as f32, y: 30.5, player: id % 2 == 0, kind: 1, parts: parts.clone() }).collect(),
+            queries: vec![SenseQuery { id: 1, x: 2.0, y: 3.0, r: 6.0, nearest: 8, target: Some(4), only: Some(vec![0, 2]) }],
+            events: vec![EventAt { x: 1.0, y: 2.0, msg: 4, body: bytes.clone(), involves: vec![1] }],
         };
         let (json, bin) = round_trip(&report);
         assert!(bin * 2 < json, "binary {bin} vs json {json}");
-        let seen = Seen { id: 1, x: 2.0, y: 3.0, group: 3, player: false, view: bytes.clone() };
+        let seen = Seen { id: 1, x: 2.0, y: 3.0, group: 3, player: false, kind: 0, parts: parts.clone() };
         round_trip(&SenseAnswers { spatial: 0x8001, tick: 1000, answers: vec![SenseAnswer { id: 2, seen: vec![seen; 8] }] });
         round_trip(&GroupCommand { to: Some(3), kind: GroupCommandKind::Leave { id: 4 } });
         round_trip(&GroupCommand { to: None, kind: GroupCommandKind::Release { moves: vec![(1, 2), (3, 4)] } });
-        round_trip(&GroupCommand { to: None, kind: GroupCommandKind::Spawn { entities: vec![NewEntity { id: 7, x: 1.0, y: 2.0, player: true, data: bytes.clone() }] } });
+        round_trip(&GroupCommand { to: None, kind: GroupCommandKind::Spawn { entities: vec![NewEntity { id: 7, x: 1.0, y: 2.0, player: true, kind: 2, parts: parts.clone() }] } });
         round_trip(&SpatialViews {
             spatial: 0x8001,
             tick: 5,
             views: vec![CellView {
                 player: 1,
-                entities: vec![ViewEntity { id: 1, x: 1.0, y: 2.0, group: 3, spatial: 0x8001, player: true, view: bytes.clone() }],
-                events: vec![serde_bytes::ByteBuf::from(bytes.clone())],
+                entities: vec![ViewEntity { id: 1, x: 1.0, y: 2.0, group: 3, spatial: 0x8001, player: true, kind: 0, parts: parts.clone() }],
+                events: vec![WireEvent { msg: 4, body: bytes.clone() }],
                 senses: vec![],
             }],
         });

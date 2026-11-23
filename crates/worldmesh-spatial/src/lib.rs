@@ -17,14 +17,13 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
-use serde_bytes::ByteBuf;
 use tokio::time::Instant;
 use tracing::{debug, info};
 
 use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
     Address, Assignment, BusKind, BusMsg, CellView, DebugReport, Envelope, EventAt, GroupId, GroupReport, Heartbeat, Kind,
-    Seen, SenseAnswer, SenseAnswers, SenseDebug, SenseQuery, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers,
+    Seen, SenseAnswer, SenseAnswers, SenseDebug, SenseQuery, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
 };
 use worldmesh_core::subjects::{
     group_inbox_subject, group_senses_subject, random_process_id, spatial_inbox_subject, spatial_reports_subject,
@@ -116,7 +115,7 @@ impl SpatialWorld {
         let entities: Vec<ViewEntity> = report
             .entities
             .into_iter()
-            .map(|e| ViewEntity { id: e.id, x: e.x, y: e.y, group, spatial, player: e.player, view: e.view })
+            .map(|e| ViewEntity { id: e.id, x: e.x, y: e.y, group, spatial, player: e.player, kind: e.kind, parts: e.parts })
             .collect();
         self.heard.insert(group, Instant::now());
         let newer = self.held.get(&group).is_none_or(|(t, _)| report.tick >= *t);
@@ -188,9 +187,16 @@ impl SpatialWorld {
 
     /// What an entity in `group` asking `q` gets: every entity of other groups in the circle
     /// (its own group already knows its own exactly, so they'd be duplicates). If the question
-    /// sets a limit (`q.nearest`), only the nearest that many, plus its target if in range.
+    /// sets a limit (`q.nearest`), only the nearest that many, plus its target if in range. If
+    /// it names components (`q.only`), only those are sent.
     fn look(&self, group: GroupId, q: &SenseQuery) -> Vec<Seen> {
-        let seen = |e: &ViewEntity| Seen { id: e.id, x: e.x, y: e.y, group: e.group, player: e.player, view: e.view.clone() };
+        let seen = |e: &ViewEntity| {
+            let parts = match &q.only {
+                None => e.parts.clone(),
+                Some(only) => e.parts.iter().filter(|(c, _)| only.contains(c)).cloned().collect(),
+            };
+            Seen { id: e.id, x: e.x, y: e.y, group: e.group, player: e.player, kind: e.kind, parts }
+        };
         let mut found: Vec<(f32, &ViewEntity)> = self
             .held
             .iter()
@@ -242,10 +248,10 @@ impl SpatialWorld {
             watching += u64::from(overlaps);
             let entities: Vec<ViewEntity> =
                 self.entities().filter(|e| e.id == v.player || view.contains(v.x, v.y, e.x, e.y, 1.0)).cloned().collect();
-            let events: Vec<ByteBuf> = events
+            let events: Vec<WireEvent> = events
                 .iter()
                 .filter(|ev| ev.involves.contains(&v.player) || view.contains(v.x, v.y, ev.x, ev.y, EVENT_MARGIN))
-                .map(|ev| ByteBuf::from(ev.event.clone()))
+                .map(|ev| WireEvent { msg: ev.msg, body: ev.body.clone() })
                 .collect();
             let senses: Vec<SenseDebug> =
                 self.answered.iter().filter(|s| view.contains(v.x, v.y, s.x, s.y, EVENT_MARGIN)).cloned().collect();
@@ -382,6 +388,7 @@ mod tests {
     use super::*;
     use worldmesh_core::config::ViewShape;
     use worldmesh_core::protocol::{Facts, Reported};
+    use serde_bytes::ByteBuf;
 
     const WEST: u32 = 0x8001;
     const EAST: u32 = 0x8002;
@@ -415,8 +422,10 @@ mod tests {
         s
     }
 
+    /// Two visible components: 0 (a byte from the id) and 1 (empty).
     fn entity(id: u32, x: f32, y: f32) -> Reported {
-        Reported { id, x, y, player: id < 100, view: vec![0x90 + (id % 10) as u8] }
+        let parts = vec![(0, ByteBuf::from(vec![0x90 + (id % 10) as u8])), (1, ByteBuf::new())];
+        Reported { id, x, y, player: id < 100, kind: 0, parts }
     }
 
     fn report(group: u32, tick: u64, entities: Vec<Reported>, queries: Vec<SenseQuery>) -> GroupReport {
@@ -431,7 +440,7 @@ mod tests {
             seq: 1,
             trace: 9,
             hops: 0,
-            kind: Kind::Action { action: vec![0xc0] },
+            kind: Kind::Action { msg: 0, body: vec![0xc0] },
         }
     }
 
@@ -451,15 +460,15 @@ mod tests {
     #[test]
     fn answers_list_other_groups_in_the_circle_but_not_the_askers_own_group() {
         let mut s = cell();
-        let q = SenseQuery { id: 100, x: 10.0, y: 10.0, r: 6.0, nearest: 0, target: None };
+        let q = SenseQuery { id: 100, x: 10.0, y: 10.0, r: 6.0, nearest: 0, target: None, only: None };
         s.receive_report(report(1, 1000, vec![entity(100, 10.0, 10.0), entity(1, 13.0, 10.0)], vec![q]));
         s.receive_report(report(2, 1000, vec![entity(2, 10.0, 15.0), entity(3, 10.0, 17.0)], vec![]));
         let answers = s.answer(1000);
         assert_eq!(answers.len(), 1);
         let (group, a) = &answers[0];
         assert_eq!(*group, 1, "the answer goes back to the asking group");
-        let seen: Vec<(u32, u32, Vec<u8>)> = a.answers[0].seen.iter().map(|e| (e.id, e.group, e.view.clone())).collect();
-        assert_eq!(seen, vec![(2, 2, vec![0x92])], "1 is in the asker's own group; 3 is 7 tiles away");
+        let seen: Vec<(u32, u32, usize)> = a.answers[0].seen.iter().map(|e| (e.id, e.group, e.parts.len())).collect();
+        assert_eq!(seen, vec![(2, 2, 2)], "1 is in the asker's own group; 3 is 7 tiles away");
         assert!(s.answer(1001).is_empty(), "each question is answered once");
     }
 
@@ -468,7 +477,7 @@ mod tests {
         let mut s = cell();
         let mut others: Vec<Reported> = (0..20).map(|i| entity(200 + i, 10.0 + 0.2 * i as f32, 11.0)).collect();
         others.push(entity(9, 15.0, 10.0));
-        let q = SenseQuery { id: 100, x: 10.0, y: 10.0, r: 12.0, nearest: 3, target: Some(9) };
+        let q = SenseQuery { id: 100, x: 10.0, y: 10.0, r: 12.0, nearest: 3, target: Some(9), only: None };
         s.receive_report(report(1, 1000, vec![entity(100, 10.0, 10.0)], vec![q]));
         s.receive_report(report(2, 1000, others, vec![]));
         let answers = s.answer(1000);
@@ -480,8 +489,19 @@ mod tests {
     }
 
     #[test]
+    fn a_question_can_ask_for_only_some_components() {
+        let mut s = cell();
+        let q = SenseQuery { id: 100, x: 10.0, y: 10.0, r: 6.0, nearest: 0, target: None, only: Some(vec![1]) };
+        s.receive_report(report(1, 1000, vec![entity(100, 10.0, 10.0)], vec![q]));
+        s.receive_report(report(2, 1000, vec![entity(2, 10.0, 12.0)], vec![]));
+        let answers = s.answer(1000);
+        let parts: Vec<u16> = answers[0].1.answers[0].seen[0].parts.iter().map(|(c, _)| *c).collect();
+        assert_eq!(parts, vec![1]);
+    }
+
+    #[test]
     fn answers_are_split_into_bounded_parts_without_losing_any() {
-        let seen = Seen { id: 1, x: 0.0, y: 0.0, group: 2, player: false, view: vec![] };
+        let seen = Seen { id: 1, x: 0.0, y: 0.0, group: 2, player: false, kind: 0, parts: vec![] };
         let answers: Vec<SenseAnswer> = (0..10).map(|id| SenseAnswer { id, seen: vec![seen.clone(); 3] }).collect();
         let parts = split_answers(SenseAnswers { spatial: WEST, tick: 5, answers }, 7);
         assert_eq!(parts.iter().map(|p| p.answers.len()).collect::<Vec<_>>(), vec![2, 2, 2, 2, 2]);
@@ -533,8 +553,8 @@ mod tests {
     fn events_go_to_the_views_that_can_see_them_and_to_whoever_is_involved() {
         let mut s = cell();
         let mut r = report(1, 1000, vec![entity(2, 20.0, 20.0)], vec![]);
-        r.events.push(EventAt { x: 20.0, y: 20.0, event: vec![0xa1, b'a'], involves: vec![] });
-        r.events.push(EventAt { x: 20.0, y: 20.0, event: vec![0xa1, b'b'], involves: vec![8] });
+        r.events.push(EventAt { x: 20.0, y: 20.0, msg: 0, body: vec![0xa1, b'a'], involves: vec![] });
+        r.events.push(EventAt { x: 20.0, y: 20.0, msg: 0, body: vec![0xa1, b'b'], involves: vec![8] });
         s.receive_report(r);
         s.receive_viewers(Viewers { tick: 1000, viewers: vec![Viewer { player: 7, x: 21.0, y: 21.0 }, Viewer { player: 8, x: 5.0, y: 60.0 }] });
         let views = s.build_views(1000);

@@ -230,7 +230,7 @@ impl Orchestrator {
             .into_iter()
             // The gateway re-sends a join if a player vanished; don't duplicate one that exists.
             .filter(|j| !self.members.contains_key(&j.id))
-            .map(|j| NewEntity { id: j.id, x: j.x, y: j.y, player: true, data: j.data })
+            .map(|j| NewEntity { id: j.id, x: j.x, y: j.y, player: true, kind: j.kind, parts: j.parts })
             .collect();
         self.place(joins).await;
     }

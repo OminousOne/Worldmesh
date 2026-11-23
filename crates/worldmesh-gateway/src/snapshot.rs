@@ -4,11 +4,14 @@
 //!
 //! - **entered**: entities newly in view, in full,
 //! - **updated**: only entities with something new, and only those fields (an entity standing
-//!   still costs nothing; its game view is sent only when its bytes change),
+//!   still costs nothing; a component is sent only when its bytes change, and a removed one by
+//!   its id alone),
 //! - **left**: entities out of view for `LEAVE_AFTER` ticks (so a one-tick gap mid-handoff
 //!   doesn't make an entity leave and come back),
-//! - the game's events (MessagePack, as encoded by the group), and debug traffic as JSON, only
-//!   if the player asked for it.
+//! - the game's events (message id and MessagePack, as encoded by the group), and debug
+//!   traffic as JSON, only if the player asked for it.
+//!
+//! Component, message and kind ids index the world's schema (sent in the welcome).
 //!
 //! Other entities' positions are `u16` steps of `1 / pos_scale` tiles (sent in the welcome);
 //! the player's own position is exact (4-byte floats), because prediction compares it bit for bit.
@@ -17,24 +20,25 @@
 //!
 //! ```text
 //! u8 kind (1; 2 = first after a reset: forget everything before applying) · u64 tick
-//! u16 entered, then per entity: u32 id · u8 flags (bit 0: player) · fields (all)
+//! u16 entered, then per entity: u32 id · u8 flags (bit 0: player) · u16 kind · fields (all)
 //! u16 updated, then per entity: u32 id · fields
 //! u16 left, then per entity: u32 id
-//! u16 events, then per event: u32 length · MessagePack
+//! u16 events, then per event: u16 message · u32 length · MessagePack
 //! u32 debug length · debug (JSON: {"senses":[…],"bus":[…],"streams":[…]}, empty parts left out)
 //!
 //! fields: u8 mask, then in this order whatever the mask says:
 //!   POS     own entity: f32 x · f32 y; others: u16 x · u16 y (tiles × pos_scale)
 //!   GROUP   u16
 //!   SPATIAL u16
-//!   VIEW    u32 length · MessagePack
+//!   PARTS   u8 count, then per component (new or changed): u16 component · u32 length · MessagePack
+//!   GONE    u8 count, then per component (removed): u16 component
 //! ```
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use worldmesh_core::protocol::{BusMsg, EntityId, SenseDebug, StreamMsg, ViewEntity};
+use worldmesh_core::protocol::{BusMsg, EntityId, Part, SenseDebug, StreamMsg, ViewEntity, WireEvent};
 
 pub const KIND_SNAPSHOT: u8 = 1;
 /// The first snapshot after a reset: the client forgets what it had.
@@ -42,18 +46,21 @@ pub const KIND_FULL: u8 = 2;
 pub const POS: u8 = 1;
 pub const GROUP: u8 = 2;
 pub const SPATIAL: u8 = 4;
-pub const VIEW: u8 = 8;
-pub const ALL: u8 = POS | GROUP | SPATIAL | VIEW;
+pub const PARTS: u8 = 8;
+pub const GONE: u8 = 16;
+/// What an entity entering view is sent with (all of it: there's nothing to remove yet).
+pub const ALL: u8 = POS | GROUP | SPATIAL | PARTS;
 /// Ticks an entity must be missing from a player's view before they're told it left.
 pub const LEAVE_AFTER: u8 = 5;
 
 /// What a player was last sent about one entity.
 #[derive(Debug, Clone, PartialEq)]
 struct Sent {
-    pos: (u32, u32),
+    pos: Pos,
     group: u16,
     spatial: u16,
-    view: Vec<u8>,
+    /// Its visible components, sorted by id.
+    parts: Vec<Part>,
     /// Ticks in a row it wasn't in the player's view.
     missing: u8,
 }
@@ -94,7 +101,7 @@ impl Encoder {
         player: EntityId,
         tick: u64,
         entities: &[ViewEntity],
-        events: &[&[u8]],
+        events: &[WireEvent],
         senses: &[SenseDebug],
         bus: &[BusMsg],
         streams: &[StreamMsg],
@@ -107,15 +114,33 @@ impl Encoder {
                 None => {
                     put_u32(&mut entered, e.id);
                     entered.push(u8::from(e.player));
-                    self.put_fields(&mut entered, player, e, ALL);
+                    entered.extend_from_slice(&e.kind.to_le_bytes());
+                    put_fields(&mut entered, &now, &now.parts, &[]);
                     self.known.insert(e.id, now);
                     n_entered += 1;
                 }
                 Some(before) => {
-                    let mask = changed(before, &now);
+                    let (new, gone) = diff(&before.parts, &now.parts);
+                    let mut mask = 0;
+                    if before.pos != now.pos {
+                        mask |= POS;
+                    }
+                    if before.group != now.group {
+                        mask |= GROUP;
+                    }
+                    if before.spatial != now.spatial {
+                        mask |= SPATIAL;
+                    }
+                    if !new.is_empty() {
+                        mask |= PARTS;
+                    }
+                    if !gone.is_empty() {
+                        mask |= GONE;
+                    }
                     if mask != 0 {
                         put_u32(&mut updated, e.id);
-                        Self::put_fields_with(self.pos_scale, &mut updated, player, e, mask);
+                        updated.push(mask);
+                        put_masked(&mut updated, mask, &now, &new, &gone);
                         n_updated += 1;
                     }
                     *before = now;
@@ -148,8 +173,9 @@ impl Encoder {
         }
         out.extend_from_slice(&(events.len().min(u16::MAX as usize) as u16).to_le_bytes());
         for ev in events.iter().take(u16::MAX as usize) {
-            put_u32(&mut out, ev.len() as u32);
-            out.extend_from_slice(ev);
+            out.extend_from_slice(&ev.msg.to_le_bytes());
+            put_u32(&mut out, ev.body.len() as u32);
+            out.extend_from_slice(&ev.body);
         }
         let empty = senses.is_empty() && bus.is_empty() && streams.is_empty();
         let debug = if empty { Vec::new() } else { serde_json::to_vec(&Debug { senses, bus, streams }).unwrap_or_default() };
@@ -160,56 +186,71 @@ impl Encoder {
 
     fn sent_state(&self, player: EntityId, e: &ViewEntity) -> Sent {
         let pos = if e.id == player {
-            (e.x.to_bits(), e.y.to_bits())
+            Pos::Exact(e.x, e.y)
         } else {
-            (u32::from(quantize(e.x, self.pos_scale)), u32::from(quantize(e.y, self.pos_scale)))
+            Pos::Steps(quantize(e.x, self.pos_scale), quantize(e.y, self.pos_scale))
         };
-        Sent { pos, group: e.group as u16, spatial: e.spatial as u16, view: e.view.clone(), missing: 0 }
-    }
-
-    fn put_fields(&self, out: &mut Vec<u8>, player: EntityId, e: &ViewEntity, mask: u8) {
-        Self::put_fields_with(self.pos_scale, out, player, e, mask);
-    }
-
-    fn put_fields_with(pos_scale: f32, out: &mut Vec<u8>, player: EntityId, e: &ViewEntity, mask: u8) {
-        out.push(mask);
-        if mask & POS != 0 {
-            if e.id == player {
-                out.extend_from_slice(&e.x.to_le_bytes());
-                out.extend_from_slice(&e.y.to_le_bytes());
-            } else {
-                out.extend_from_slice(&quantize(e.x, pos_scale).to_le_bytes());
-                out.extend_from_slice(&quantize(e.y, pos_scale).to_le_bytes());
-            }
-        }
-        if mask & GROUP != 0 {
-            out.extend_from_slice(&(e.group as u16).to_le_bytes());
-        }
-        if mask & SPATIAL != 0 {
-            out.extend_from_slice(&(e.spatial as u16).to_le_bytes());
-        }
-        if mask & VIEW != 0 {
-            put_u32(out, e.view.len() as u32);
-            out.extend_from_slice(&e.view);
-        }
+        let mut parts = e.parts.clone();
+        parts.sort_by_key(|(c, _)| *c);
+        Sent { pos, group: e.group as u16, spatial: e.spatial as u16, parts, missing: 0 }
     }
 }
 
-fn changed(a: &Sent, b: &Sent) -> u8 {
-    let mut mask = 0;
-    if a.pos != b.pos {
-        mask |= POS;
+/// A position as sent: exact for the player's own entity, in steps for others.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Pos {
+    Exact(f32, f32),
+    Steps(u16, u16),
+}
+
+/// What changed between two sorted component lists: (new or changed, removed).
+fn diff<'a>(before: &[Part], now: &'a [Part]) -> (Vec<&'a Part>, Vec<u16>) {
+    let new = now.iter().filter(|p| !before.contains(p)).collect();
+    let gone = before.iter().map(|(c, _)| *c).filter(|c| !now.iter().any(|(n, _)| n == c)).collect();
+    (new, gone)
+}
+
+/// Every field, for an entity entering view.
+fn put_fields(out: &mut Vec<u8>, s: &Sent, parts: &[Part], gone: &[u16]) {
+    let refs: Vec<&Part> = parts.iter().collect();
+    out.push(ALL);
+    put_masked(out, ALL, s, &refs, gone);
+}
+
+/// The fields `mask` names, in the order the format gives.
+fn put_masked(out: &mut Vec<u8>, mask: u8, s: &Sent, parts: &[&Part], gone: &[u16]) {
+    if mask & POS != 0 {
+        match s.pos {
+            Pos::Exact(x, y) => {
+                out.extend_from_slice(&x.to_le_bytes());
+                out.extend_from_slice(&y.to_le_bytes());
+            }
+            Pos::Steps(x, y) => {
+                out.extend_from_slice(&x.to_le_bytes());
+                out.extend_from_slice(&y.to_le_bytes());
+            }
+        }
     }
-    if a.group != b.group {
-        mask |= GROUP;
+    if mask & GROUP != 0 {
+        out.extend_from_slice(&s.group.to_le_bytes());
     }
-    if a.spatial != b.spatial {
-        mask |= SPATIAL;
+    if mask & SPATIAL != 0 {
+        out.extend_from_slice(&s.spatial.to_le_bytes());
     }
-    if a.view != b.view {
-        mask |= VIEW;
+    if mask & PARTS != 0 {
+        out.push(parts.len().min(255) as u8);
+        for (c, bytes) in parts.iter().take(255) {
+            out.extend_from_slice(&c.to_le_bytes());
+            put_u32(out, bytes.len() as u32);
+            out.extend_from_slice(bytes);
+        }
     }
-    mask
+    if mask & GONE != 0 {
+        out.push(gone.len().min(255) as u8);
+        for c in gone.iter().take(255) {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+    }
 }
 
 fn quantize(v: f32, scale: f32) -> u16 {
@@ -223,19 +264,32 @@ fn put_u32(out: &mut Vec<u8>, v: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_bytes::ByteBuf;
 
     const SCALE: f32 = 1023.0;
+
+    /// An entity as a client has it.
+    #[derive(Debug, Clone, PartialEq)]
+    struct Known {
+        x: f32,
+        y: f32,
+        group: u32,
+        spatial: u32,
+        player: bool,
+        kind: u16,
+        parts: BTreeMap<u16, Vec<u8>>,
+    }
 
     /// A reader for the format, as the client does it, to check what the encoder wrote.
     #[derive(Default)]
     struct Decoder {
-        known: BTreeMap<u32, ViewEntity>,
+        known: BTreeMap<u32, Known>,
     }
 
     struct Decoded {
         tick: u64,
         counts: (usize, usize, usize),
-        events: Vec<Vec<u8>>,
+        events: Vec<(u16, Vec<u8>)>,
         debug: usize,
     }
 
@@ -246,18 +300,19 @@ mod tests {
                 *at += n;
                 &buf[*at - n..*at]
             };
+            let u8_ = |at: &mut usize| take(at, 1)[0];
             let u16_ = |at: &mut usize| u16::from_le_bytes(take(at, 2).try_into().unwrap());
             let u32_ = |at: &mut usize| u32::from_le_bytes(take(at, 4).try_into().unwrap());
-            let kind = take(&mut at, 1)[0];
+            let kind = u8_(&mut at);
             assert!(kind == KIND_SNAPSHOT || kind == KIND_FULL);
             if kind == KIND_FULL {
                 self.known.clear();
             }
             let tick = u64::from_le_bytes(take(&mut at, 8).try_into().unwrap());
-            let fields = |at: &mut usize, e: &mut ViewEntity| {
-                let mask = take(at, 1)[0];
+            let fields = |at: &mut usize, id: u32, e: &mut Known| {
+                let mask = u8_(at);
                 if mask & POS != 0 {
-                    if e.id == me {
+                    if id == me {
                         e.x = f32::from_bits(u32_(at));
                         e.y = f32::from_bits(u32_(at));
                     } else {
@@ -271,24 +326,33 @@ mod tests {
                 if mask & SPATIAL != 0 {
                     e.spatial = u32::from(u16_(at));
                 }
-                if mask & VIEW != 0 {
-                    let n = u32_(at) as usize;
-                    e.view = take(at, n).to_vec();
+                if mask & PARTS != 0 {
+                    for _ in 0..u8_(at) {
+                        let c = u16_(at);
+                        let n = u32_(at) as usize;
+                        e.parts.insert(c, take(at, n).to_vec());
+                    }
+                }
+                if mask & GONE != 0 {
+                    for _ in 0..u8_(at) {
+                        e.parts.remove(&u16_(at));
+                    }
                 }
             };
             let n = u16_(&mut at) as usize;
             for _ in 0..n {
                 let id = u32_(&mut at);
-                let player = take(&mut at, 1)[0] & 1 != 0;
-                let mut e = ViewEntity { id, x: 0.0, y: 0.0, group: 0, spatial: 0, player, view: Vec::new() };
-                fields(&mut at, &mut e);
+                let player = u8_(&mut at) & 1 != 0;
+                let kind = u16_(&mut at);
+                let mut e = Known { x: 0.0, y: 0.0, group: 0, spatial: 0, player, kind, parts: BTreeMap::new() };
+                fields(&mut at, id, &mut e);
                 self.known.insert(id, e);
             }
             let u = u16_(&mut at) as usize;
             for _ in 0..u {
                 let id = u32_(&mut at);
                 let mut e = self.known.remove(&id).expect("updated entity was known");
-                fields(&mut at, &mut e);
+                fields(&mut at, id, &mut e);
                 self.known.insert(id, e);
             }
             let l = u16_(&mut at) as usize;
@@ -299,8 +363,9 @@ mod tests {
             let ne = u16_(&mut at) as usize;
             let events = (0..ne)
                 .map(|_| {
+                    let msg = u16_(&mut at);
                     let n = u32_(&mut at) as usize;
-                    take(&mut at, n).to_vec()
+                    (msg, take(&mut at, n).to_vec())
                 })
                 .collect();
             let debug = u32_(&mut at) as usize;
@@ -310,8 +375,14 @@ mod tests {
         }
     }
 
+    fn part(c: u16, bytes: &[u8]) -> Part {
+        (c, ByteBuf::from(bytes.to_vec()))
+    }
+
+    /// Two components: 0 is health (100), 1 is a name.
     fn entity(id: u32, x: f32, y: f32) -> ViewEntity {
-        ViewEntity { id, x, y, group: 7, spatial: 0x8001, player: id == 1, view: vec![0x81, 0xa2, b'h', b'p', 100] }
+        let parts = vec![part(0, &[100]), part(1, &[0xa1, b'a'])];
+        ViewEntity { id, x, y, group: 7, spatial: 0x8001, player: id == 1, kind: 3, parts }
     }
 
     #[test]
@@ -324,16 +395,17 @@ mod tests {
         assert_eq!((d.tick, d.counts), (1000, (3, 0, 0)));
         assert_eq!(dec.known[&1].x, 10.123_457, "our own position is exact");
         assert!(dec.known[&1].player && !dec.known[&2].player);
+        assert_eq!((dec.known[&2].kind, dec.known[&2].parts.len()), (3, 2));
         assert!((dec.known[&2].x - 30.0).abs() < 1.0 / SCALE);
 
-        // Only entity 2 moves, and entity 3's view changes.
+        // Entity 2 moves; entity 3's health changes and it loses its name.
         world[1].x = 30.25;
-        world[2].view = vec![0x81, 0xa2, b'h', b'p', 80];
+        world[2].parts = vec![part(0, &[80])];
         let second = enc.encode(1, 1001, &world, &[], &[], &[], &[]);
         let d = dec.decode(1, &second);
         assert_eq!(d.counts, (0, 2, 0));
         assert!((dec.known[&2].x - 30.25).abs() < 1.0 / SCALE);
-        assert_eq!(dec.known[&3].view, world[2].view);
+        assert_eq!(dec.known[&3].parts, BTreeMap::from([(0, vec![80])]));
         assert!(second.len() < 48, "{} bytes for two small changes", second.len());
 
         // Nothing changes: nearly empty.
@@ -342,12 +414,26 @@ mod tests {
     }
 
     #[test]
+    fn only_the_component_that_changed_is_sent() {
+        let (mut enc, mut dec) = (Encoder::new(SCALE), Decoder::default());
+        let big = vec![0xc4; 200];
+        let mut e = entity(2, 1.0, 1.0);
+        e.parts.push(part(5, &big));
+        dec.decode(1, &enc.encode(1, 1, std::slice::from_ref(&e), &[], &[], &[], &[]));
+        e.parts[0] = part(0, &[99]);
+        let second = enc.encode(1, 2, std::slice::from_ref(&e), &[], &[], &[], &[]);
+        dec.decode(1, &second);
+        assert!(second.len() < 40, "the big component isn't re-sent: {} bytes", second.len());
+        assert_eq!(dec.known[&2].parts[&5], big);
+    }
+
+    #[test]
     fn events_and_debug_ride_along() {
         let (mut enc, mut dec) = (Encoder::new(SCALE), Decoder::default());
-        let ev: &[u8] = &[0x81, 0xa1, b'e', 0xa3, b'h', b'i', b't'];
+        let ev = WireEvent { msg: 4, body: vec![0x81, 0xa1, b'e', 0xa3, b'h', b'i', b't'] };
         let sense = SenseDebug { id: 1, x: 1.0, y: 1.0, r: 6.0, found: 2, spatial: vec![0x8001] };
-        let d = dec.decode(1, &enc.encode(1, 5, &[entity(1, 1.0, 1.0)], &[ev, ev], &[sense], &[], &[]));
-        assert_eq!(d.events, vec![ev.to_vec(), ev.to_vec()]);
+        let d = dec.decode(1, &enc.encode(1, 5, &[entity(1, 1.0, 1.0)], &[ev.clone(), ev.clone()], &[sense], &[], &[]));
+        assert_eq!(d.events, vec![(4, ev.body.clone()), (4, ev.body)]);
         assert!(d.debug > 0);
     }
 
@@ -383,36 +469,46 @@ mod tests {
     #[test]
     fn the_client_fixture_matches_what_the_encoder_writes() {
         use serde_json::json;
+        use worldmesh_core::codec::{bytes_to_json, to_bytes};
+        // The world's schema, as the client gets it in the welcome.
+        let schema = json!({ "components": ["health", "name", "burning"], "messages": ["hit"], "kinds": ["hero", "bot"] });
+        let names = ["health", "name", "burning"];
         let me = 7;
-        let view = |hp: u32, name: &str| worldmesh_core::codec::to_bytes(&json!({ "hp": hp, "name": name })).unwrap();
-        let entity = |id: u32, x: f32, y: f32, group: u32, hp: u32| ViewEntity {
-            id,
-            x,
-            y,
-            group,
-            spatial: 0x8001,
-            player: id < 100,
-            view: view(hp, &format!("e{id}")),
+        let entity = |id: u32, x: f32, y: f32, group: u32, hp: u32, burning: bool| {
+            let mut parts = vec![(0, ByteBuf::from(to_bytes(&hp).unwrap())), (1, ByteBuf::from(to_bytes(&format!("e{id}")).unwrap()))];
+            if burning {
+                parts.push((2, ByteBuf::from(to_bytes(&json!({ "ticks": 3 })).unwrap())));
+            }
+            ViewEntity { id, x, y, group, spatial: 0x8001, player: id < 100, kind: u16::from(id >= 100), parts }
         };
-        let event = worldmesh_core::codec::to_bytes(&json!({ "k": "hit", "target": 101, "damage": 12 })).unwrap();
+        let event = WireEvent { msg: 0, body: to_bytes(&json!({ "target": 101, "damage": 12 })).unwrap() };
         let sense = SenseDebug { id: 101, x: 3.0, y: 4.0, r: 6.0, found: 2, spatial: vec![0x8001] };
         let mut enc = Encoder::new(SCALE);
-        let first = vec![entity(me, 10.123_4, 20.5, 1, 100), entity(101, 12.25, 20.75, 2, 100), entity(102, 30.0, 31.0, 2, 50)];
+        let first = vec![
+            entity(me, 10.123_4, 20.5, 1, 100, false),
+            entity(101, 12.25, 20.75, 2, 100, true),
+            entity(102, 30.0, 31.0, 2, 50, false),
+        ];
         let a = enc.encode(me, 1000, &first, &[], &[], &[], &[]);
-        // 7 moved, 101 got hurt (view changed) and moved group, 102 is gone (5 ticks later it leaves).
-        let second = vec![entity(me, 10.623_4, 20.5, 1, 100), entity(101, 12.25, 20.75, 3, 88)];
-        let rest: Vec<Vec<u8>> =
-            (1001..=1005).map(|tick| enc.encode(me, tick, &second, &[&event], std::slice::from_ref(&sense), &[], &[])).collect();
+        // 7 moved; 101 got hurt, stopped burning and moved group; 102 is gone (5 ticks later it leaves).
+        let second = vec![entity(me, 10.623_4, 20.5, 1, 100, false), entity(101, 12.25, 20.75, 3, 88, false)];
+        let rest: Vec<Vec<u8>> = (1001..=1005)
+            .map(|tick| enc.encode(me, tick, &second, std::slice::from_ref(&event), std::slice::from_ref(&sense), &[], &[]))
+            .collect();
         let q = |v: f32| f64::from(quantize(v, SCALE)) / f64::from(SCALE);
         let shown = |e: &ViewEntity| {
             let (x, y) = if e.id == me { (f64::from(e.x), f64::from(e.y)) } else { (q(e.x), q(e.y)) };
+            let view: serde_json::Map<String, serde_json::Value> =
+                e.parts.iter().map(|(c, b)| (names[*c as usize].to_string(), bytes_to_json(b))).collect();
+            let kind = ["hero", "bot"][e.kind as usize];
             json!({ "id": e.id, "x": x, "y": y, "group": e.group, "spatial": e.spatial, "player": e.player,
-                    "view": worldmesh_core::codec::bytes_to_json(&e.view) })
+                    "kind": kind, "view": view })
         };
         let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
         let fixture = json!({
             "me": me,
             "pos_scale": SCALE,
+            "schema": schema,
             // Applied in order; what the client should have is given after the first and the last.
             "snapshots": std::iter::once(json!({ "hex": hex(&a), "tick": 1000,
                     "entities": first.iter().map(shown).collect::<Vec<_>>(), "events": [], "senses": [] }))
@@ -422,7 +518,7 @@ mod tests {
                         json!({ "hex": hex(b), "tick": tick })
                     } else {
                         json!({ "hex": hex(b), "tick": tick, "entities": second.iter().map(shown).collect::<Vec<_>>(),
-                                "events": [worldmesh_core::codec::bytes_to_json(&event)], "senses": [sense] })
+                                "events": [{ "name": "hit", "data": bytes_to_json(&event.body) }], "senses": [sense] })
                     }
                 }))
                 .collect::<Vec<_>>(),
@@ -436,5 +532,4 @@ mod tests {
         let saved = std::fs::read_to_string(&path).expect("fixture missing: run with WORLDMESH_WRITE_FIXTURES=1");
         assert_eq!(saved, text, "the snapshot format changed: rewrite the fixture and check the client");
     }
-
 }

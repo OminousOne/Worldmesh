@@ -1,7 +1,9 @@
 use super::*;
-use crate::game::Spawn;
-use worldmesh_core::protocol::{SenseAnswer, Seen};
 use crate::test_game::*;
+use crate::world::{Stage, World};
+use crate::{Bundle, Component, Spawn};
+use worldmesh_core::codec;
+use worldmesh_core::protocol::{SenseAnswer, Seen};
 
 const WEST: u32 = 0x8001;
 const EAST: u32 = 0x8002;
@@ -25,24 +27,33 @@ fn west_east() -> Assignment {
     }
 }
 
-fn world(id: u32) -> GroupWorld<TestGame> {
-    let mut w = GroupWorld::new(id, Arc::new(TestGame));
+fn world(id: u32) -> GroupWorld {
+    let mut w = GroupWorld::new(id, rules());
     w.set_assignment(&west_east());
     w
 }
 
-fn spawn_at(w: &mut GroupWorld<TestGame>, id: u32, x: f32, y: f32, player: bool) {
-    let data = codec::to_bytes(&Data { hp: 100, ..Data::default() }).unwrap();
-    let n = NewEntity { id, x, y, player, data };
+/// A "unit" (the test game's only kind) at (x, y).
+fn spawn_at(w: &mut GroupWorld, id: u32, x: f32, y: f32, player: bool) {
+    let n = NewEntity { id, x, y, player, kind: 0, parts: Vec::new() };
     w.command(GroupCommand { to: None, kind: GroupCommandKind::Spawn { entities: vec![n] } });
 }
 
-fn x(w: &GroupWorld<TestGame>, id: u32) -> f32 {
+fn x(w: &GroupWorld, id: u32) -> f32 {
     w.entity(id).unwrap().x
 }
 
-fn data(w: &GroupWorld<TestGame>, id: u32) -> &Data {
-    &w.entity(id).unwrap().data
+fn log(w: &GroupWorld, id: u32) -> Vec<String> {
+    w.entity(id).unwrap().get::<Log>().unwrap().0.clone()
+}
+
+/// The id a message has in the test game.
+fn msg<M: crate::Message>() -> u16 {
+    rules().message_id::<M>().unwrap()
+}
+
+fn damage(n: i32) -> Kind {
+    Kind::Action { msg: msg::<Damage>(), body: codec::to_bytes(&Damage(n)).unwrap() }
 }
 
 fn envelope(to: Address, from: u32, seq: u64, kind: Kind) -> Envelope {
@@ -57,17 +68,18 @@ fn input(id: u32, seq: u64, dx: f32, dy: f32, at_tick: u64, sub: u8) -> Envelope
 
 /// What the gateway sends for a player's command (stamped at `tick`).
 fn command(player: u32, seq: u64, cmd: Command, tick: u64) -> Envelope {
-    let mut env = envelope(Address::Entity { id: player }, player, seq, Kind::Command { command: codec::to_bytes(&cmd).unwrap() });
+    let kind = Kind::Command { msg: msg::<Command>(), body: codec::to_bytes(&cmd).unwrap() };
+    let mut env = envelope(Address::Entity { id: player }, player, seq, kind);
     env.from.tick = tick;
     env
 }
 
-fn release(w: &mut GroupWorld<TestGame>, id: u32, to: u32) {
+fn release(w: &mut GroupWorld, id: u32, to: u32) {
     w.command(GroupCommand { to: Some(w.group_id), kind: GroupCommandKind::Release { moves: vec![(id, to)] } });
 }
 
 /// Deliver everything `from` published to whichever of `groups` should get it.
-fn deliver(from: &mut GroupWorld<TestGame>, groups: &mut [&mut GroupWorld<TestGame>]) -> Vec<String> {
+fn deliver(from: &mut GroupWorld, groups: &mut [&mut GroupWorld]) -> Vec<String> {
     let out = from.take_outbox();
     let subjects = out.iter().map(|(s, _)| s.clone()).collect();
     for (subject, env) in out {
@@ -83,7 +95,7 @@ fn deliver(from: &mut GroupWorld<TestGame>, groups: &mut [&mut GroupWorld<TestGa
     subjects
 }
 
-fn hand_off(a: &mut GroupWorld<TestGame>, b: &mut GroupWorld<TestGame>, id: u32, tick: u64) {
+fn hand_off(a: &mut GroupWorld, b: &mut GroupWorld, id: u32, tick: u64) {
     release(a, id, b.group_id);
     for (_, env) in a.take_releases(tick) {
         b.receive(env);
@@ -190,8 +202,7 @@ fn a_late_handoff_for_a_departed_player_is_dropped() {
 #[test]
 fn commands_for_another_group_are_ignored() {
     let mut w = world(1);
-    let data = codec::to_bytes(&Data::default()).unwrap();
-    let n = NewEntity { id: 3, x: 30.5, y: 30.5, player: false, data };
+    let n = NewEntity { id: 3, x: 30.5, y: 30.5, player: false, kind: 0, parts: Vec::new() };
     w.command(GroupCommand { to: Some(2), kind: GroupCommandKind::Spawn { entities: vec![n] } });
     assert_eq!(w.entity_count(), 0);
 }
@@ -207,9 +218,9 @@ fn an_action_for_an_entity_in_another_group_goes_through_the_bus_and_lands_next_
     a.step(1001); // the player's group handles the command: the action goes out
     assert_eq!(deliver(&mut a, &mut [&mut b]), vec![entity_subject(99)]);
     b.step(1001);
-    assert!(data(&b, 99).log.is_empty(), "sent on tick 1001: lands on 1002, not before");
+    assert!(log(&b, 99).is_empty(), "sent on tick 1001: lands on 1002, not before");
     b.step(1002);
-    assert_eq!(data(&b, 99).log, vec!["dmg 10 from 1 on 1002"]);
+    assert_eq!(log(&b, 99), vec!["dmg 10 from 1 on 1002"]);
     assert_eq!(b.counters.actions_received, 1);
 }
 
@@ -221,9 +232,9 @@ fn actions_land_on_the_next_tick_even_in_the_same_group() {
     w.receive(command(1, 1, Command::Hit { target: 2 }, 1000));
     w.step(1001);
     assert!(w.take_outbox().is_empty(), "stays in the group");
-    assert!(data(&w, 2).log.is_empty());
+    assert!(log(&w, 2).is_empty());
     w.step(1002);
-    assert_eq!(data(&w, 2).log, vec!["dmg 10 from 1 on 1002"]);
+    assert_eq!(log(&w, 2), vec!["dmg 10 from 1 on 1002"]);
     assert_eq!(w.counters.actions_local, 1);
 }
 
@@ -232,13 +243,13 @@ fn an_action_that_arrives_early_still_waits_for_the_next_tick() {
     let mut w = world(2);
     spawn_at(&mut w, 99, 12.0, 10.0, false);
     // Group 1 is a little ahead and already ran tick 1001; we haven't yet.
-    let mut env = envelope(Address::Entity { id: 99 }, 1, 1, Kind::Action { action: codec::to_bytes(&Action::Damage(3)).unwrap() });
+    let mut env = envelope(Address::Entity { id: 99 }, 1, 1, damage(3));
     env.from.tick = 1001;
     w.receive(env);
     w.step(1001);
-    assert!(data(&w, 99).log.is_empty());
+    assert!(log(&w, 99).is_empty());
     w.step(1002);
-    assert_eq!(data(&w, 99).log, vec!["dmg 3 from 1 on 1002"]);
+    assert_eq!(log(&w, 99), vec!["dmg 3 from 1 on 1002"]);
 }
 
 #[test]
@@ -252,7 +263,7 @@ fn a_player_can_only_command_their_own_entity() {
     w.receive(env);
     w.step(1001);
     w.step(1002);
-    assert!(data(&w, 2).log.is_empty());
+    assert!(log(&w, 2).is_empty());
 }
 
 #[test]
@@ -261,7 +272,7 @@ fn an_action_for_an_entity_that_just_left_is_forwarded_and_applied_once() {
     spawn_at(&mut a, 99, 12.0, 10.0, false);
     hand_off(&mut a, &mut b, 99, 1000);
     // Group 3's action reaches both: the old group (stale subscription) and the new one.
-    let mut env = envelope(Address::Entity { id: 99 }, 5, 1, Kind::Action { action: codec::to_bytes(&Action::Damage(4)).unwrap() });
+    let mut env = envelope(Address::Entity { id: 99 }, 5, 1, damage(4));
     env.from = Facts { id: 5, group: 3, x: 0.0, y: 0.0, tick: 1000 };
     a.receive(env.clone());
     b.receive(env);
@@ -269,7 +280,7 @@ fn an_action_for_an_entity_that_just_left_is_forwarded_and_applied_once() {
     assert_eq!(deliver(&mut a, &mut [&mut b]), vec![group_inbox_subject(2)]);
     b.step(1001);
     b.step(1002);
-    assert_eq!(data(&b, 99).log, vec!["dmg 4 from 5 on 1001"], "applied once, not twice");
+    assert_eq!(log(&b, 99), vec!["dmg 4 from 5 on 1001"], "applied once, not twice");
 }
 
 #[test]
@@ -283,7 +294,7 @@ fn a_command_that_misses_its_player_mid_handoff_is_forwarded() {
     deliver(&mut a, &mut [&mut b]);
     b.step(1001); // the forwarded command is handled; its action goes to entity 2, here
     b.step(1002);
-    assert_eq!(data(&b, 2).log, vec!["dmg 10 from 1 on 1002"]);
+    assert_eq!(log(&b, 2), vec!["dmg 10 from 1 on 1002"]);
 }
 
 #[test]
@@ -303,14 +314,14 @@ fn an_area_action_lands_once_on_our_entities_in_the_circle_but_not_the_sender() 
     spawn_at(&mut w, 1, 20.0, 20.0, true);
     spawn_at(&mut w, 2, 21.0, 20.0, false);
     spawn_at(&mut w, 3, 30.0, 20.0, false);
-    let mut env = envelope(Address::Area { x: 20.0, y: 20.0, r: 2.0 }, 1, 1, Kind::Action { action: codec::to_bytes(&Action::Damage(5)).unwrap() });
+    let mut env = envelope(Address::Area { x: 20.0, y: 20.0, r: 2.0 }, 1, 1, damage(5));
     env.from.tick = 1000;
     w.receive(env.clone());
     w.receive(env); // a second cell passes on the same action
     w.step(1001);
-    assert!(data(&w, 1).log.is_empty(), "not the sender");
-    assert_eq!(data(&w, 2).log, vec!["dmg 5 from 1 on 1001 area"]);
-    assert!(data(&w, 3).log.is_empty(), "outside the circle");
+    assert!(log(&w, 1).is_empty(), "not the sender");
+    assert_eq!(log(&w, 2), vec!["dmg 5 from 1 on 1001 area"]);
+    assert!(log(&w, 3).is_empty(), "outside the circle");
 }
 
 #[test]
@@ -329,8 +340,8 @@ fn an_action_for_everyone_reaches_every_entity_once() {
     }
     a.step(1002);
     b.step(1002);
-    assert_eq!(data(&a, 1).log, vec!["dmg 1 from 1 on 1002 all"]);
-    assert_eq!(data(&b, 2).log, vec!["dmg 1 from 1 on 1002 all"]);
+    assert_eq!(log(&a, 1), vec!["dmg 1 from 1 on 1002 all"]);
+    assert_eq!(log(&b, 2), vec!["dmg 1 from 1 on 1002 all"]);
 }
 
 #[test]
@@ -344,7 +355,8 @@ fn spawns_go_to_the_orchestrator_and_despawned_entities_are_gone() {
     let spawns = w.take_spawns();
     assert_eq!(spawns.len(), 1);
     assert_eq!((spawns[0].x, spawns[0].player), (11.0, false));
-    assert_eq!(codec::from_bytes::<Data>(&spawns[0].data).unwrap().hp, 7);
+    let health = rules().component_id::<Health>().unwrap();
+    assert_eq!(spawns[0].parts.iter().find(|(c, _)| *c == health).map(|(_, b)| codec::from_bytes::<Health>(b).unwrap()), Some(Health(7)));
     assert!(w.entity(SPAWNED).is_none());
 }
 
@@ -353,7 +365,7 @@ const SPAWNED: u32 = worldmesh_core::protocol::SPAWNED_ID_START + 5;
 // ---- The spatial layer ----
 
 #[test]
-fn each_entity_is_reported_to_the_cell_of_where_it_stands_with_its_view() {
+fn each_entity_is_reported_to_the_cell_of_where_it_stands_with_its_visible_components() {
     let mut w = world(1);
     spawn_at(&mut w, 1, 10.0, 10.0, true);
     spawn_at(&mut w, 2, 40.0, 10.0, false);
@@ -361,8 +373,9 @@ fn each_entity_is_reported_to_the_cell_of_where_it_stands_with_its_view() {
     let reports: BTreeMap<u32, GroupReport> = w.take_reports(1001).into_iter().collect();
     assert_eq!(reports[&WEST].entities.iter().map(|e| e.id).collect::<Vec<_>>(), vec![1]);
     assert_eq!(reports[&EAST].entities.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2]);
-    let view: View = codec::from_bytes(&reports[&WEST].entities[0].view).unwrap();
-    assert_eq!(view, View { hp: 100 });
+    let parts = &reports[&WEST].entities[0].parts;
+    assert_eq!(parts.len(), 1, "only Health is visible (not Walker or Log)");
+    assert_eq!(codec::from_bytes::<Health>(&parts[0].1), Some(Health(100)));
     assert!(reports[&WEST].entities[0].player);
 }
 
@@ -371,62 +384,170 @@ fn events_go_to_the_cell_of_where_they_happened() {
     let mut w = world(1);
     spawn_at(&mut w, 1, 10.0, 10.0, true);
     spawn_at(&mut w, 2, 40.0, 10.0, false);
-    let mut env = envelope(Address::Entity { id: 2 }, 1, 1, Kind::Action { action: codec::to_bytes(&Action::Damage(5)).unwrap() });
+    let mut env = envelope(Address::Entity { id: 2 }, 1, 1, damage(5));
     env.from.tick = 1000;
     w.receive(env);
     w.step(1001);
     let reports: BTreeMap<u32, GroupReport> = w.take_reports(1001).into_iter().collect();
     assert!(reports[&WEST].events.is_empty());
-    let ev: Event = codec::from_bytes(&reports[&EAST].events[0].event).unwrap();
-    assert_eq!(ev, Event::Hurt { id: 2, hp: 95 });
+    let ev = &reports[&EAST].events[0];
+    assert_eq!(ev.msg, msg::<Hurt>());
+    assert_eq!(codec::from_bytes::<Hurt>(&ev.body), Some(Hurt { id: 2, hp: 95 }));
 }
 
-/// A game that asks what's near and remembers what it found.
-struct Asker;
-impl Game for Asker {
-    type Data = Vec<(u32, bool)>;
-    type View = View;
-    type Input = Input;
-    type Command = Command;
-    type Action = Action;
-    type Event = Event;
-    type Welcome = ();
-    fn config(&self) -> WorldConfig {
-        TestGame.config()
-    }
-    fn welcome(&self) {}
-    fn join(&self, _: EntityId) -> Spawn<Self::Data> {
-        Spawn { x: 0.0, y: 0.0, data: Vec::new() }
-    }
-    fn view(&self, _: &Entity<Self::Data>) -> View {
-        View { hp: 1 }
-    }
-    fn tick(&self, me: &mut Me<'_, Self>, _: &[Timed<Input>]) {
+/// What an asking entity found: (id, local, its health if it could read it).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+struct Found(Vec<(u32, bool, Option<i32>)>);
+impl Component for Found {
+    const NAME: &'static str = "found";
+}
+
+/// The test game plus a kind that asks what's near every tick and remembers what it found.
+fn asking_world() -> GroupWorld {
+    let mut world: World = crate::test_game::world();
+    world.kind("asker", Bundle::new().with(Health(1)).with(Found::default())).system_for::<Found>(Stage::Last, |me| {
         me.query(6.0);
-        let found: Vec<(u32, bool)> = me.nearby(6.0).into_iter().map(|n| (n.id, n.local)).collect();
-        me.data = found;
-    }
+        let found = me.nearby(6.0).into_iter().map(|n| (n.id, n.local, n.get::<Health>().map(|h| h.0))).collect();
+        me.insert(Found(found));
+    });
+    let mut w = GroupWorld::new(1, world.build());
+    w.set_assignment(&west_east());
+    w
 }
 
 #[test]
 fn questions_go_with_the_reports_and_answers_show_up_in_nearby() {
-    let mut w = GroupWorld::new(1, Arc::new(Asker));
-    w.set_assignment(&west_east());
-    let data = codec::to_bytes(&Vec::<(u32, bool)>::new()).unwrap();
+    let mut w = asking_world();
     for (id, x) in [(1, 10.0), (2, 12.0)] {
-        let n = NewEntity { id, x, y: 10.0, player: false, data: data.clone() };
+        let n = NewEntity { id, x, y: 10.0, player: false, kind: 1, parts: Vec::new() };
         w.command(GroupCommand { to: None, kind: GroupCommandKind::Spawn { entities: vec![n] } });
     }
     w.step(1001);
     let reports: BTreeMap<u32, GroupReport> = w.take_reports(1001).into_iter().collect();
     assert_eq!(reports[&WEST].queries.len(), 2);
     // The cell answers: entity 9 of group 2 stands next to entity 1.
-    let view = codec::to_bytes(&View { hp: 50 }).unwrap();
-    let seen = Seen { id: 9, x: 11.0, y: 11.0, group: 2, player: true, view };
+    let health = (0, serde_bytes::ByteBuf::from(codec::to_bytes(&Health(50)).unwrap()));
+    let seen = Seen { id: 9, x: 11.0, y: 11.0, group: 2, player: true, kind: 0, parts: vec![health] };
     w.receive_senses(SenseAnswers { spatial: WEST, tick: 1001, answers: vec![SenseAnswer { id: 1, seen: vec![seen] }] });
     w.step(1002);
-    let found = &w.entity(1).unwrap().data;
-    assert_eq!(found, &vec![(2, true), (9, false)], "its own group's entity exactly, the other group's from the answer");
+    let found = &w.entity(1).unwrap().get::<Found>().unwrap().0;
+    assert_eq!(found, &vec![(2, true, Some(1)), (9, false, Some(50))], "its own group's entity exactly, the other group's from the answer");
+}
+
+#[test]
+fn only_visible_components_of_others_can_be_read() {
+    let mut w = world(1);
+    spawn_at(&mut w, 1, 10.0, 10.0, false);
+    spawn_at(&mut w, 2, 11.0, 10.0, false);
+    let rules = rules();
+    let mut record = w.entities.remove(&1).unwrap();
+    let others = BTreeMap::from([(2, w.entities.remove(&2).unwrap())]);
+    let (mut requests, mut despawned) = (Requests::default(), false);
+    let me = Me {
+        rules: &rules,
+        entity: &mut record.entity,
+        meta: &mut record.meta,
+        tick: 1,
+        group: 1,
+        trace: 0,
+        others: &others,
+        sensed: &[],
+        inputs: &[],
+        requests: &mut requests,
+        despawned: &mut despawned,
+    };
+    let seen = me.find(2).map(|n| (n.get::<Health>(), n.get::<Log>(), n.kind().to_string()));
+    assert_eq!(seen, Some((Some(Health(100)), None, "unit".to_string())), "Log isn't visible, so it reads as missing");
+}
+
+#[test]
+fn a_query_can_ask_for_only_some_components() {
+    let mut w = world(1);
+    spawn_at(&mut w, 1, 10.0, 10.0, false);
+    let rules = rules();
+    let mut record = w.entities.remove(&1).unwrap();
+    let others = BTreeMap::new();
+    let (mut requests, mut despawned) = (Requests::default(), false);
+    let mut me = Me {
+        rules: &rules,
+        entity: &mut record.entity,
+        meta: &mut record.meta,
+        tick: 1,
+        group: 1,
+        trace: 0,
+        others: &others,
+        sensed: &[],
+        inputs: &[],
+        requests: &mut requests,
+        despawned: &mut despawned,
+    };
+    me.query(crate::Query::within(5.0).with::<Health>().nearest(3).target(9));
+    me.query(4.0);
+    let health = rules.component_id::<Health>().unwrap();
+    assert_eq!(requests.queries[0].only, Some(vec![health]));
+    assert_eq!((requests.queries[0].nearest, requests.queries[0].target), (3, Some(9)));
+    assert_eq!(requests.queries[1].only, None, "everything visible by default");
+}
+
+#[test]
+fn every_handler_for_an_action_runs_in_order_until_one_despawns_the_entity() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc as StdArc;
+    let calls = StdArc::new(AtomicU32::new(0));
+    let mut world = crate::test_game::world();
+    let c = calls.clone();
+    world.action(move |_me, _: &Damage, _| {
+        c.fetch_add(1, Ordering::Relaxed);
+    });
+    world.action(|me, &Damage(n): &Damage, _| {
+        if n >= 50 {
+            me.despawn();
+        }
+    });
+    let c = calls.clone();
+    world.action(move |_me, _: &Damage, _| {
+        c.fetch_add(100, Ordering::Relaxed);
+    });
+    let mut w = GroupWorld::new(1, world.build());
+    w.set_assignment(&west_east());
+    spawn_at(&mut w, 1, 10.0, 10.0, false);
+    spawn_at(&mut w, 2, 11.0, 10.0, false);
+    for (id, n) in [(1, 5), (2, 50)] {
+        let mut env = envelope(Address::Entity { id }, 9, id.into(), damage(n));
+        env.from.tick = 1000;
+        w.receive(env);
+    }
+    w.step(1001);
+    assert_eq!(log(&w, 1), vec!["dmg 5 from 9 on 1001"], "the test game's own handler ran first");
+    assert!(w.entity(2).is_none());
+    assert_eq!(calls.load(Ordering::Relaxed), 1 + 100 + 1, "entity 2's last handler didn't run");
+}
+
+#[test]
+fn systems_run_stage_by_stage_across_every_entity() {
+    use std::sync::{Arc as StdArc, Mutex};
+    let order = StdArc::new(Mutex::new(Vec::new()));
+    let mut world = crate::test_game::world();
+    for (stage, name) in [(Stage::Last, "last"), (Stage::First, "first")] {
+        let order = order.clone();
+        world.system(stage, move |me| order.lock().unwrap().push(format!("{name} {}", me.id)));
+    }
+    let mut w = GroupWorld::new(1, world.build());
+    spawn_at(&mut w, 1, 10.0, 10.0, false);
+    spawn_at(&mut w, 2, 11.0, 10.0, false);
+    w.step(1001);
+    assert_eq!(*order.lock().unwrap(), vec!["first 1", "first 2", "last 1", "last 2"]);
+}
+
+#[test]
+fn a_spawn_starts_with_its_kinds_components_plus_its_own() {
+    let rules = rules();
+    let spawn = Spawn::new("unit", 1.0, 2.0).with(Health(7));
+    let (kind, parts) = rules.encode_spawn(&spawn).unwrap();
+    let e = rules.new_entity(5, 1.0, 2.0, false, kind, &parts).unwrap();
+    assert_eq!(e.get::<Health>(), Some(&Health(7)));
+    assert!(e.has::<Walker>() && e.has::<Log>());
+    assert!(rules.encode_spawn(&Spawn::new("dragon", 0.0, 0.0)).is_none(), "an unknown kind");
 }
 
 // ---- Fake lag ----

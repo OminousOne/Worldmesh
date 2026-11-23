@@ -2059,11 +2059,13 @@ dependencies = [
  "anyhow",
  "async-nats",
  "clap",
+ "serde",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "worldmesh-core",
  "worldmesh-gateway",
+ "worldmesh-macros",
  "worldmesh-orchestrator",
  "worldmesh-sim",
  "worldmesh-spatial",
@@ -2102,6 +2104,15 @@ dependencies = [
  "tracing",
  "worldmesh-core",
  "worldmesh-sim",
+]
+
+[[package]]
+name = "worldmesh-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

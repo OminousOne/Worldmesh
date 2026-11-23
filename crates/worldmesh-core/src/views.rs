@@ -4,9 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde_bytes::ByteBuf;
 
-use crate::protocol::{Address, EntityId, Envelope, Facts, Kind, SenseDebug, SpatialViews, ViewEntity};
+use crate::protocol::{Address, EntityId, Envelope, Facts, Kind, SenseDebug, SpatialViews, ViewEntity, WireEvent};
 use crate::{codec, time};
 
 /// Numbers players' inputs and commands (unique per process, for ordering and dedupe).
@@ -18,7 +17,7 @@ pub fn merge_view(
     player: EntityId,
     fresh: &[SpatialViews],
     new_events: &BTreeSet<u32>,
-) -> (Vec<ViewEntity>, Vec<ByteBuf>, Vec<SenseDebug>) {
+) -> (Vec<ViewEntity>, Vec<WireEvent>, Vec<SenseDebug>) {
     let mut entities: BTreeMap<EntityId, (u64, ViewEntity)> = BTreeMap::new();
     let mut events = Vec::new();
     let mut senses: BTreeMap<EntityId, SenseDebug> = BTreeMap::new();

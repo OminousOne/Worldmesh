@@ -1,4 +1,4 @@
-//! One binary, four roles. A game's `main` hands its [`Game`] to [`run`], and the same binary
+//! One binary, four roles. A game's `main` hands its [`World`] to [`run`], and the same binary
 //! then runs as whichever process the command line asks for:
 //!
 //! ```text
@@ -12,7 +12,6 @@
 //! containers: run any number of identical `group` or `spatial` containers and they pick their
 //! own ids.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -23,8 +22,8 @@ use tracing_subscriber::EnvFilter;
 use worldmesh_core::protocol::GroupId;
 use worldmesh_core::time;
 use worldmesh_gateway::GatewayOptions;
-use worldmesh_sim::game::Game;
 use worldmesh_sim::group;
+use worldmesh_sim::world::World;
 use {worldmesh_gateway as gateway, worldmesh_orchestrator as orchestrator, worldmesh_spatial as spatial};
 
 /// The command line every Worldmesh process takes.
@@ -81,14 +80,14 @@ pub enum Role {
     },
 }
 
-/// Run the process the command line asks for, with this game. Sets up logging (`RUST_LOG`,
+/// Run the process the command line asks for, with this world. Sets up logging (`RUST_LOG`,
 /// default `info`) unless the program already has a tracing subscriber.
-pub async fn run<G: Game>(game: G) -> Result<()> {
-    run_with(game, Cli::parse()).await
+pub async fn run(world: World) -> Result<()> {
+    run_with(world, Cli::parse()).await
 }
 
 /// Like [`run`], with a command line you parsed yourself (say, as part of a bigger CLI).
-pub async fn run_with<G: Game>(game: G, cli: Cli) -> Result<()> {
+pub async fn run_with(world: World, cli: Cli) -> Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .try_init();
@@ -96,14 +95,15 @@ pub async fn run_with<G: Game>(game: G, cli: Cli) -> Result<()> {
     let tick_ms = time::set_tick_hz(cli.tick_hz);
     info!(tick_hz = cli.tick_hz, tick_ms, "tick rate");
     let nats = connect_with_retry(&cli.nats_url).await;
-    let config = game.config();
-    let game = Arc::new(game);
+    // Checked (and frozen) the same way in every role, so a mistake shows up everywhere.
+    let rules = world.build();
+    let config = rules.config;
 
     match cli.role {
-        Role::Group { group_id } => group::run(nats, game, group_id).await,
+        Role::Group { group_id } => group::run(nats, rules, group_id).await,
         Role::Spatial { spatial_id } => spatial::run(nats, config, spatial_id).await,
         Role::Gateway { listen, nats_monitor, allow_debug } => {
-            gateway::run(nats, game, GatewayOptions { listen, nats_monitor, allow_debug }).await
+            gateway::run(nats, rules, GatewayOptions { listen, nats_monitor, allow_debug }).await
         }
         Role::Orchestrator { groups, spatial } => orchestrator::run(nats, config, groups, spatial).await,
     }
