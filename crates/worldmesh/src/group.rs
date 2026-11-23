@@ -160,6 +160,11 @@ impl<G: Game> GroupWorld<G> {
         self.entities.len()
     }
 
+    /// Every entity this group simulates.
+    pub fn entities(&self) -> impl Iterator<Item = &Entity<G::Data>> {
+        self.entities.values().map(|r| &r.entity)
+    }
+
     /// An entity simulated here (for tests and tools).
     pub fn entity(&self, id: EntityId) -> Option<&Entity<G::Data>> {
         self.entities.get(&id).map(|r| &r.entity)
@@ -925,4 +930,4 @@ pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, first_group: O
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

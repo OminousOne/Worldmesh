@@ -341,7 +341,7 @@ fn json_snapshot(
 
 /// One player's view: their parts of every Spatial Layer Cell's views, merged. An entity near
 /// a border can be in two cells' parts (it moved between reports); keep the newest copy.
-fn merge_view(
+pub(crate) fn merge_view(
     player: EntityId,
     fresh: &[SpatialViews],
     new_events: &BTreeSet<u32>,
@@ -486,7 +486,7 @@ async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
 }
 
 /// An envelope from the gateway to a player's own entity.
-fn to_entity(id: EntityId, kind: Kind, traced: bool) -> Envelope {
+pub(crate) fn to_entity(id: EntityId, kind: Kind, traced: bool) -> Envelope {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let trace = if traced { codec::splitmix64(seq ^ (u64::from(id) << 40)) } else { 0 };
     let from = Facts { id, group: 0, x: 0.0, y: 0.0, tick: time::current_tick() };

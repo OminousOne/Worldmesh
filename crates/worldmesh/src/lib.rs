@@ -36,6 +36,7 @@ pub mod snapshot;
 pub mod spatial;
 pub mod stats;
 pub mod subjects;
+pub mod testing;
 pub mod time;
 
 pub use cli::{run, run_with, Cli, Role};

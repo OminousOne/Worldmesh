@@ -6,29 +6,29 @@ use serde::{Deserialize, Serialize};
 
 // ---- A tiny game: entities walk at one tile per tick and take damage ----
 
-struct TestGame;
+pub(crate) struct TestGame;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-struct Data {
-    hp: i32,
-    dir: (f32, f32),
+pub(crate) struct Data {
+    pub hp: i32,
+    pub dir: (f32, f32),
     /// What happened to it: "dmg <n> from <sender> on <tick>[ fwd][ area][ all]".
-    log: Vec<String>,
+    pub log: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct View {
-    hp: i32,
+pub(crate) struct View {
+    pub hp: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct Input {
-    dx: f32,
-    dy: f32,
+pub(crate) struct Input {
+    pub dx: f32,
+    pub dy: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum Command {
+pub(crate) enum Command {
     Hit { target: u32 },
     Blast { x: f32, y: f32, r: f32 },
     Shout,
@@ -37,13 +37,13 @@ enum Command {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum Action {
+pub(crate) enum Action {
     Damage(i32),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "e", rename_all = "snake_case")]
-enum Event {
+pub(crate) enum Event {
     Hurt { id: u32, hp: i32 },
 }
 
