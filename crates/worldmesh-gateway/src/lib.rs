@@ -12,7 +12,7 @@
 //! pass through as bytes (decoded to JSON only for players who asked for JSON snapshots).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,24 +29,25 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc, Notify};
 use tracing::{debug, info, warn};
 
-use crate::config::WorldConfig;
-use crate::game::Game;
-use crate::protocol::{
-    Address, Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, Envelope, Facts, GroupCommand, GroupCommandKind,
+use worldmesh_core::config::WorldConfig;
+use worldmesh_sim::game::Game;
+use worldmesh_core::protocol::{
+    Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, GroupCommand, GroupCommandKind,
     JoinRequest, Kind, ProcessStats, SenseDebug, ServerMsg, SnapshotEntity, SpatialViews, StreamKind, StreamMsg, ViewEntity,
     Viewer, Viewers,
 };
 use crate::snapshot::Encoder;
-use crate::subjects::{entity_subject, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, STATS, VIEWERS, VIEWS};
-use crate::{bus, codec, stats, time};
+use worldmesh_core::subjects::{entity_subject, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, STATS, VIEWERS, VIEWS};
+pub mod snapshot;
+
+use worldmesh_core::views::{from_player, merge_view};
+use worldmesh_core::{bus, codec, stats, time};
 
 /// Longest to wait after a tick boundary for every Spatial Layer Cell's views (they wait up
 /// to 40 ms for the groups first). Normally everything arrives within a few ms.
 const MERGE_TIMEOUT: Duration = Duration::from_millis(60);
 /// A player missing from their own view for this many 1 s checks is re-joined.
 const REJOIN_AFTER_CHECKS: u32 = 3;
-/// Numbers players' inputs and commands (unique across the gateway, for ordering and dedupe).
-static SEQ: AtomicU64 = AtomicU64::new(1);
 /// Inputs may be scheduled at most this far ahead.
 const MAX_INPUT_LEAD_MS: u64 = 5000;
 
@@ -319,7 +320,7 @@ fn json_snapshot(
     entities: &[ViewEntity],
     events: &[ByteBuf],
     senses: &[SenseDebug],
-    bus: &[crate::protocol::BusMsg],
+    bus: &[worldmesh_core::protocol::BusMsg],
     streams: &[StreamMsg],
 ) -> Vec<u8> {
     let entities = entities
@@ -337,39 +338,6 @@ fn json_snapshot(
     let events = events.iter().map(|e| codec::bytes_to_json(e)).collect();
     let msg = ServerMsg::Snapshot { tick, entities, events, senses: senses.to_vec(), bus: bus.to_vec(), streams: streams.to_vec() };
     serde_json::to_vec(&msg).unwrap_or_default()
-}
-
-/// One player's view: their parts of every Spatial Layer Cell's views, merged. An entity near
-/// a border can be in two cells' parts (it moved between reports); keep the newest copy.
-pub(crate) fn merge_view(
-    player: EntityId,
-    fresh: &[SpatialViews],
-    new_events: &BTreeSet<u32>,
-) -> (Vec<ViewEntity>, Vec<ByteBuf>, Vec<SenseDebug>) {
-    let mut entities: BTreeMap<EntityId, (u64, ViewEntity)> = BTreeMap::new();
-    let mut events = Vec::new();
-    let mut senses: BTreeMap<EntityId, SenseDebug> = BTreeMap::new();
-    for cell in fresh {
-        let Some(v) = cell.views.iter().find(|v| v.player == player) else { continue };
-        for e in &v.entities {
-            if entities.get(&e.id).is_none_or(|(t, _)| cell.tick > *t) {
-                entities.insert(e.id, (cell.tick, e.clone()));
-            }
-        }
-        if new_events.contains(&cell.spatial) {
-            events.extend(v.events.iter().cloned());
-            for s in &v.senses {
-                senses
-                    .entry(s.id)
-                    .and_modify(|m| {
-                        m.found += s.found;
-                        m.spatial.extend(s.spatial.iter().copied());
-                    })
-                    .or_insert_with(|| s.clone());
-            }
-        }
-    }
-    (entities.into_values().map(|(_, e)| e).collect(), events, senses.into_values().collect())
 }
 
 async fn ws_handler<G: Game>(ws: WebSocketUpgrade, State(state): State<AppState<G>>) -> impl IntoResponse {
@@ -485,16 +453,8 @@ async fn handle_socket<G: Game>(socket: WebSocket, state: AppState<G>) {
     info!(id, "player disconnected");
 }
 
-/// An envelope from the gateway to a player's own entity.
-pub(crate) fn to_entity(id: EntityId, kind: Kind, traced: bool) -> Envelope {
-    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let trace = if traced { codec::splitmix64(seq ^ (u64::from(id) << 40)) } else { 0 };
-    let from = Facts { id, group: 0, x: 0.0, y: 0.0, tick: time::current_tick() };
-    Envelope { to: Address::Entity { id }, from, via: 0, seq, trace, hops: 0, kind }
-}
-
 /// The game's value from a player, checked against its type and encoded for the bus.
-fn transcode<T: crate::game::Wire>(value: Value) -> Result<Vec<u8>, String> {
+fn transcode<T: worldmesh_sim::game::Wire>(value: Value) -> Result<Vec<u8>, String> {
     let typed: T = serde_json::from_value(value).map_err(|e| e.to_string())?;
     codec::to_bytes(&typed).ok_or_else(|| "couldn't encode".into())
 }
@@ -533,7 +493,7 @@ async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8
             let sub = sub.min(substeps - 1);
             let now_ms = time::world_ms();
             let (at_tick, at_sub) = schedule_input(tick, sub, now_ms / time::tick_ms());
-            let env = to_entity(id, Kind::Input { at_tick, sub: at_sub, input }, false);
+            let env = from_player(id, Kind::Input { at_tick, sub: at_sub, input }, false);
             bus::publish(&state.nats, entity_subject(id), &env).await;
             // Tick 0 ("as soon as possible") has no moment to be early for.
             let early = if tick == 0 { 0 } else { early_ms(tick, sub, substeps, now_ms) };
@@ -549,7 +509,7 @@ async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8
                     return None;
                 }
             };
-            let env = to_entity(id, Kind::Command { command }, true);
+            let env = from_player(id, Kind::Command { command }, true);
             bus::publish(&state.nats, entity_subject(id), &env).await;
             None
         }
@@ -582,7 +542,7 @@ async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::CellView;
+    use worldmesh_core::protocol::CellView;
     use serde::{Deserialize, Serialize};
 
     fn entity(id: u32, x: f32, spatial: u32) -> ViewEntity {
@@ -638,7 +598,7 @@ mod tests {
 
     #[test]
     fn inputs_are_scheduled_no_earlier_than_the_next_tick_and_not_far_ahead() {
-        crate::time::set_tick_hz(10);
+        worldmesh_core::time::set_tick_hz(10);
         assert_eq!(schedule_input(0, 5, 1000), (1001, 0), "as soon as possible");
         assert_eq!(schedule_input(999, 5, 1000), (1001, 0), "too late for its tick");
         assert_eq!(schedule_input(1003, 5, 1000), (1003, 5));

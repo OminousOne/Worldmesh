@@ -2058,9 +2058,25 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-nats",
- "axum",
- "bytes",
  "clap",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "worldmesh-core",
+ "worldmesh-gateway",
+ "worldmesh-orchestrator",
+ "worldmesh-sim",
+ "worldmesh-spatial",
+ "worldmesh-testing",
+]
+
+[[package]]
+name = "worldmesh-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "bytes",
  "futures",
  "rmp-serde",
  "serde",
@@ -2068,7 +2084,75 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "tracing-subscriber",
+]
+
+[[package]]
+name = "worldmesh-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "axum",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "worldmesh-core",
+ "worldmesh-sim",
+]
+
+[[package]]
+name = "worldmesh-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "serde",
+ "tokio",
+ "tracing",
+ "worldmesh-core",
+]
+
+[[package]]
+name = "worldmesh-sim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "worldmesh-core",
+]
+
+[[package]]
+name = "worldmesh-spatial"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "serde",
+ "serde_bytes",
+ "tokio",
+ "tracing",
+ "worldmesh-core",
+]
+
+[[package]]
+name = "worldmesh-testing"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "worldmesh-core",
+ "worldmesh-sim",
+ "worldmesh-spatial",
 ]
 
 [[package]]

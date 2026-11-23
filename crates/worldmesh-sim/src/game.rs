@@ -10,14 +10,14 @@ use std::collections::BTreeMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::config::WorldConfig;
-use crate::protocol::{Address, EntityId, Envelope, Facts, GroupId, Kind, SenseQuery};
+use worldmesh_core::config::WorldConfig;
+use worldmesh_core::protocol::{Address, EntityId, Envelope, Facts, GroupId, Kind, SenseQuery};
 
 /// Bounds every game type needs: it travels between processes.
 pub trait Wire: Serialize + DeserializeOwned + Clone + Send + Sync + 'static {}
 impl<T: Serialize + DeserializeOwned + Clone + Send + Sync + 'static> Wire for T {}
 
-/// Your game. Implement this and pass it to [`crate::run`].
+/// Your game. Implement this and pass it to `worldmesh::run`.
 ///
 /// Every server process of a world runs the same binary, so they all have the same `Game`.
 /// Only group hosts call the simulation methods; the gateway calls [`Game::welcome`] and
@@ -246,10 +246,10 @@ impl<G: Game> Me<'_, G> {
     /// on another machine, or moving between groups), stamped with this entity's id, position
     /// and the current tick. Returns its trace (to tag events with, for the debug view).
     pub fn send(&mut self, to: To, action: G::Action) -> u64 {
-        let Some(bytes) = crate::codec::to_bytes(&action) else { return 0 };
+        let Some(bytes) = worldmesh_core::codec::to_bytes(&action) else { return 0 };
         self.meta.seq += 1;
         let from = Facts { id: self.entity.id, group: self.group, x: self.entity.x, y: self.entity.y, tick: self.tick };
-        let trace = if self.trace != 0 { self.trace } else { crate::codec::trace_id(self.entity.id, self.meta.seq) };
+        let trace = if self.trace != 0 { self.trace } else { worldmesh_core::codec::trace_id(self.entity.id, self.meta.seq) };
         let to = match to {
             To::Entity(id) => Address::Entity { id },
             To::Area { x, y, r } => Address::Area { x, y, r },

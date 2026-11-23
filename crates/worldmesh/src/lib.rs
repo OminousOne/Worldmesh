@@ -23,21 +23,14 @@
 //!
 //! See the guides at the repository's `docs/` site, and `examples/medieval` for a full game.
 
-pub mod bus;
 pub mod cli;
-pub mod codec;
-pub mod config;
-pub mod game;
-pub mod gateway;
-pub mod group;
-pub mod orchestrator;
-pub mod protocol;
-pub mod snapshot;
-pub mod spatial;
-pub mod stats;
-pub mod subjects;
-pub mod testing;
-pub mod time;
+
+pub use worldmesh_core::{bus, codec, config, protocol, stats, subjects, time, views};
+pub use worldmesh_gateway as gateway;
+pub use worldmesh_orchestrator as orchestrator;
+pub use worldmesh_sim::{game, group};
+pub use worldmesh_spatial as spatial;
+pub use worldmesh_testing as testing;
 
 pub use cli::{run, run_with, Cli, Role};
 pub use config::{ViewShape, WorldConfig};

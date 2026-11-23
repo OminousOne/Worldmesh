@@ -18,17 +18,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use crate::config::{partition, WorldConfig};
-use crate::game::{Entity, Game};
-use crate::gateway::{merge_view, to_entity};
-use crate::group::GroupWorld;
-use crate::protocol::{
+use worldmesh_core::config::{partition, WorldConfig};
+use worldmesh_sim::game::{Entity, Game};
+use worldmesh_core::views::{from_player, merge_view};
+use worldmesh_sim::group::GroupWorld;
+use worldmesh_core::protocol::{
     Assignment, EntityId, Envelope, GroupCommand, GroupCommandKind, GroupId, Kind, NewEntity, SpatialViews, Viewer, Viewers,
     SPAWNED_ID_START,
 };
-use crate::spatial::SpatialWorld;
-use crate::subjects::{BROADCAST, SPATIAL_ID_BIT};
-use crate::{codec, time};
+use worldmesh_spatial::SpatialWorld;
+use worldmesh_core::subjects::{BROADCAST, SPATIAL_ID_BIT};
+use worldmesh_core::{codec, time};
 
 /// The tick a test world starts on.
 pub const FIRST_TICK: u64 = 1000;
@@ -180,17 +180,17 @@ impl<G: Game> TestWorld<G> {
     /// A player's input for sub-step `sub` of tick `tick`.
     pub fn input_at(&mut self, player: EntityId, tick: u64, sub: u8, input: G::Input) {
         let input = codec::to_bytes(&input).expect("the game's input encodes");
-        let mut env = to_entity(player, Kind::Input { at_tick: tick, sub, input }, false);
+        let mut env = from_player(player, Kind::Input { at_tick: tick, sub, input }, false);
         env.from.tick = self.tick;
-        self.pending.push((crate::subjects::entity_subject(player), env));
+        self.pending.push((worldmesh_core::subjects::entity_subject(player), env));
     }
 
     /// A player's command, handled by their entity on the next tick.
     pub fn command(&mut self, player: EntityId, command: G::Command) {
         let command = codec::to_bytes(&command).expect("the game's command encodes");
-        let mut env = to_entity(player, Kind::Command { command }, true);
+        let mut env = from_player(player, Kind::Command { command }, true);
         env.from.tick = self.tick;
-        self.pending.push((crate::subjects::entity_subject(player), env));
+        self.pending.push((worldmesh_core::subjects::entity_subject(player), env));
     }
 
     /// Move an entity to another group, as the orchestrator would: it's handed off live at
@@ -218,7 +218,7 @@ impl<G: Game> TestWorld<G> {
         for (&id, g) in self.groups.iter_mut() {
             g.step(tick);
             reports.extend(g.take_reports(tick));
-            sent.extend(g.take_releases(tick).into_iter().map(|(to, env)| (crate::subjects::group_inbox_subject(to), env)));
+            sent.extend(g.take_releases(tick).into_iter().map(|(to, env)| (worldmesh_core::subjects::group_inbox_subject(to), env)));
             sent.extend(g.take_outbox());
             spawned.extend(g.take_spawns().into_iter().map(|e| (id, e)));
         }
@@ -367,7 +367,7 @@ impl<G: Game> TestWorld<G> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::group::tests::{Command, Event, Input, TestGame, View};
+    use worldmesh_sim::test_game::{Command, Event, Input, TestGame, View};
 
     /// Alice in group 1 and Bob in group 2, both at (10.5, 10.5).
     fn two_players() -> (TestWorld<TestGame>, EntityId, EntityId) {

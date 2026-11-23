@@ -23,20 +23,20 @@ use anyhow::Result;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
-use crate::codec;
-use crate::config::WorldConfig;
+use worldmesh_core::codec;
+use worldmesh_core::config::WorldConfig;
 use crate::game::{Entity, Game, Incoming, Me, Meta, Record, Requests, Sensed, Timed};
-use crate::protocol::{
+use worldmesh_core::protocol::{
     Address, Assignment, BusKind, BusMsg, DebugReport, EntityId, Envelope, EventAt, Facts, GroupCommand, GroupCommandKind,
     GroupId, GroupReport, Heartbeat, HostCommand, Kind, NewEntity, ProcessStats, Reported, SenseAnswers, SenseQuery,
     SpawnRequest, StreamKind, StreamMsg,
 };
-use crate::subjects::{
+use worldmesh_core::subjects::{
     entity_subject, group_inbox_subject, group_senses_subject, random_process_id, spatial_inbox_subject,
     spatial_reports_subject, ASSIGNMENTS, BROADCAST, DEBUG_REPORTS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, SPAWNS,
     STATS,
 };
-use crate::{bus, stats, time};
+use worldmesh_core::{bus, stats, time};
 
 /// How long the old group keeps forwarding envelopes for an entity it handed off.
 const FORWARD_FOR_MS: u64 = 1000;
@@ -847,7 +847,7 @@ fn lag_of(a: &Assignment, group: GroupId) -> Duration {
 /// A group host process: runs its first group, then whatever groups the orchestrator starts here.
 pub async fn run<G: Game>(nats: async_nats::Client, game: Arc<G>, first_group: Option<GroupId>) -> Result<()> {
     let host_id = random_process_id(false);
-    let first = first_group.filter(|&id| id != 0 && !crate::subjects::is_spatial_id(id)).unwrap_or_else(|| random_process_id(false));
+    let first = first_group.filter(|&id| id != 0 && !worldmesh_core::subjects::is_spatial_id(id)).unwrap_or_else(|| random_process_id(false));
     let mut assignment: Option<Assignment> = None;
     let mut runners: BTreeMap<GroupId, Runner<G>> = BTreeMap::new();
     runners.insert(first, Runner::start(&nats, first, game.clone(), None).await?);

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The world every process agrees on. The game returns it from
-/// [`Game::config`](crate::Game::config); every role must run with the same one.
+/// `Game::config`; every role must run with the same one.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct WorldConfig {
     /// World size in tiles. Positions are `f32` tile coordinates in `0..width`, `0..height`.

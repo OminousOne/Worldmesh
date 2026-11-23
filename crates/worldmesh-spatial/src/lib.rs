@@ -21,16 +21,16 @@ use serde_bytes::ByteBuf;
 use tokio::time::Instant;
 use tracing::{debug, info};
 
-use crate::config::WorldConfig;
-use crate::protocol::{
+use worldmesh_core::config::WorldConfig;
+use worldmesh_core::protocol::{
     Address, Assignment, BusKind, BusMsg, CellView, DebugReport, Envelope, EventAt, GroupId, GroupReport, Heartbeat, Kind,
     Seen, SenseAnswer, SenseAnswers, SenseDebug, SenseQuery, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers,
 };
-use crate::subjects::{
+use worldmesh_core::subjects::{
     group_inbox_subject, group_senses_subject, random_process_id, spatial_inbox_subject, spatial_reports_subject,
     ASSIGNMENTS, DEBUG_REPORTS, HEARTBEATS, SPATIAL_ID_BIT, VIEWERS, VIEWS,
 };
-use crate::{bus, stats, time};
+use worldmesh_core::{bus, stats, time};
 
 /// After a tick starts, wait at most this long for every group's report before answering
 /// and building views with what has arrived. Normally they all arrive within a few ms.
@@ -380,8 +380,8 @@ async fn finish_tick(nats: &async_nats::Client, world: &mut SpatialWorld, tick: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ViewShape;
-    use crate::protocol::{Facts, Reported};
+    use worldmesh_core::config::ViewShape;
+    use worldmesh_core::protocol::{Facts, Reported};
 
     const WEST: u32 = 0x8001;
     const EAST: u32 = 0x8002;

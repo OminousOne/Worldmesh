@@ -1,0 +1,16 @@
+[package]
+name = "worldmesh-orchestrator"
+description = "Worldmesh orchestrator: which groups and cells are in use, and where entities go."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-nats.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+worldmesh-core = { path = "../worldmesh-core", version = "0.1.0" }

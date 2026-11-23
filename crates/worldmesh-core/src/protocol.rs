@@ -71,7 +71,7 @@ pub enum ServerMsg {
         world: WorldConfig,
         /// Other entities' positions in optimized snapshots are `u16` steps of `1 / pos_scale`.
         pos_scale: f32,
-        /// Whatever the game sends every player on connect ([`crate::Game::welcome`]).
+        /// Whatever the game sends every player on connect (`Game::welcome`).
         game: Value,
     },
     /// What this player can see this tick, plus debug traffic if they asked for it.
@@ -113,7 +113,7 @@ pub struct SnapshotEntity {
     pub spatial: GroupId,
     /// Controlled by a connected player.
     pub player: bool,
-    /// The game's view of it ([`crate::Game::view`]).
+    /// The game's view of it (`Game::view`).
     pub view: Value,
 }
 
@@ -311,7 +311,7 @@ pub struct DebugCommand {
 }
 
 /// Gateway -> orchestrator: a player connected. Where they appear and their starting data
-/// come from the game ([`crate::Game::join`]).
+/// come from the game (`Game::join`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinRequest {
     pub id: EntityId,

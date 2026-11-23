@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::protocol::{BusMsg, EntityId, SenseDebug, StreamMsg, ViewEntity};
+use worldmesh_core::protocol::{BusMsg, EntityId, SenseDebug, StreamMsg, ViewEntity};
 
 pub const KIND_SNAPSHOT: u8 = 1;
 /// The first snapshot after a reset: the client forgets what it had.
@@ -384,7 +384,7 @@ mod tests {
     fn the_client_fixture_matches_what_the_encoder_writes() {
         use serde_json::json;
         let me = 7;
-        let view = |hp: u32, name: &str| crate::codec::to_bytes(&json!({ "hp": hp, "name": name })).unwrap();
+        let view = |hp: u32, name: &str| worldmesh_core::codec::to_bytes(&json!({ "hp": hp, "name": name })).unwrap();
         let entity = |id: u32, x: f32, y: f32, group: u32, hp: u32| ViewEntity {
             id,
             x,
@@ -394,7 +394,7 @@ mod tests {
             player: id < 100,
             view: view(hp, &format!("e{id}")),
         };
-        let event = crate::codec::to_bytes(&json!({ "k": "hit", "target": 101, "damage": 12 })).unwrap();
+        let event = worldmesh_core::codec::to_bytes(&json!({ "k": "hit", "target": 101, "damage": 12 })).unwrap();
         let sense = SenseDebug { id: 101, x: 3.0, y: 4.0, r: 6.0, found: 2, spatial: vec![0x8001] };
         let mut enc = Encoder::new(SCALE);
         let first = vec![entity(me, 10.123_4, 20.5, 1, 100), entity(101, 12.25, 20.75, 2, 100), entity(102, 30.0, 31.0, 2, 50)];
@@ -407,7 +407,7 @@ mod tests {
         let shown = |e: &ViewEntity| {
             let (x, y) = if e.id == me { (f64::from(e.x), f64::from(e.y)) } else { (q(e.x), q(e.y)) };
             json!({ "id": e.id, "x": x, "y": y, "group": e.group, "spatial": e.spatial, "player": e.player,
-                    "view": crate::codec::bytes_to_json(&e.view) })
+                    "view": worldmesh_core::codec::bytes_to_json(&e.view) })
         };
         let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
         let fixture = json!({
@@ -422,7 +422,7 @@ mod tests {
                         json!({ "hex": hex(b), "tick": tick })
                     } else {
                         json!({ "hex": hex(b), "tick": tick, "entities": second.iter().map(shown).collect::<Vec<_>>(),
-                                "events": [crate::codec::bytes_to_json(&event)], "senses": [sense] })
+                                "events": [worldmesh_core::codec::bytes_to_json(&event)], "senses": [sense] })
                     }
                 }))
                 .collect::<Vec<_>>(),

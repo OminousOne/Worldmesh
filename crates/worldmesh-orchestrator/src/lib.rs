@@ -22,13 +22,13 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use tracing::{info, warn};
 
-use crate::config::{partition, WorldConfig};
-use crate::protocol::{
+use worldmesh_core::config::{partition, WorldConfig};
+use worldmesh_core::protocol::{
     Assignment, DebugCommand, EntityId, GroupCommand, GroupCommandKind, GroupId, Heartbeat, HostCommand, JoinRequest,
     NewEntity, SpawnRequest, SPAWNED_ID_START,
 };
-use crate::subjects::{random_process_id, ASSIGNMENTS, DEBUG_COMMANDS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, JOINS, SPAWNS};
-use crate::{bus, stats, time};
+use worldmesh_core::subjects::{random_process_id, ASSIGNMENTS, DEBUG_COMMANDS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, JOINS, SPAWNS};
+use worldmesh_core::{bus, stats, time};
 
 /// A process that hasn't sent a heartbeat for this long is considered dead.
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(3);
@@ -517,7 +517,7 @@ pub async fn run(nats: async_nats::Client, config: WorldConfig, groups: u32, spa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codec::splitmix64;
+    use worldmesh_core::codec::splitmix64;
 
     fn config() -> WorldConfig {
         WorldConfig::default()

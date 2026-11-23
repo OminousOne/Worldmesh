@@ -1,0 +1,19 @@
+[package]
+name = "worldmesh-testing"
+description = "Test Worldmesh games in one process, tick by tick, without NATS."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_bytes.workspace = true
+serde_json.workspace = true
+worldmesh-core = { path = "../worldmesh-core", version = "0.1.0" }
+worldmesh-sim = { path = "../worldmesh-sim", version = "0.1.0" }
+worldmesh-spatial = { path = "../worldmesh-spatial", version = "0.1.0" }
+
+[dev-dependencies]
+worldmesh-sim = { path = "../worldmesh-sim", features = ["test-game"] }

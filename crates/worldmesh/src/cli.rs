@@ -20,10 +20,12 @@ use clap::{Parser, Subcommand};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use crate::game::Game;
-use crate::gateway::GatewayOptions;
-use crate::protocol::GroupId;
-use crate::{gateway, group, orchestrator, spatial, time};
+use worldmesh_core::protocol::GroupId;
+use worldmesh_core::time;
+use worldmesh_gateway::GatewayOptions;
+use worldmesh_sim::game::Game;
+use worldmesh_sim::group;
+use {worldmesh_gateway as gateway, worldmesh_orchestrator as orchestrator, worldmesh_spatial as spatial};
 
 /// The command line every Worldmesh process takes.
 #[derive(Debug, Clone, Parser)]

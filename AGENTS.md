@@ -8,7 +8,11 @@ https://ominousone.github.io/Worldmesh/ (machine-readable: `/llms.txt`, `/llms-f
 
 | Path | What |
 | --- | --- |
-| `crates/worldmesh` | The library (Rust). One module per role: `group`, `spatial`, `orchestrator`, `gateway`; plus `game` (the `Game` trait and `Me`), `protocol` (every message), `bus` (NATS, MessagePack or JSON), `snapshot` (compact client snapshots), `testing` (`TestWorld`), `cli` (`worldmesh::run`) |
+| `crates/worldmesh` | The library games depend on: re-exports everything below, plus `worldmesh::run` (`cli`) |
+| `crates/worldmesh-core` | Shared by every process: `protocol` (every message), `bus` (NATS, MessagePack or JSON), `codec`, `config`, `subjects`, `time`, `stats`, `views` |
+| `crates/worldmesh-sim` | Server Entity Groups: the game model (`game`) and simulation (`group`) |
+| `crates/worldmesh-spatial`, `-orchestrator`, `-gateway` | One crate per role; the gateway also has `snapshot` (compact client snapshots) |
+| `crates/worldmesh-testing` | `TestWorld` |
 | `packages/client` | `@worldmesh/client` (TypeScript): connection, snapshot decoding, interpolation, prediction |
 | `packages/debug` | `@worldmesh/debug` (TypeScript): the debug panel, metrics and bus view |
 | `examples/hello` | Tag: the smallest complete game (server only) |
@@ -31,10 +35,10 @@ Run all of the first three before committing.
 
 ## Rules
 
-- **Game code runs only in Server Entity Groups.** Cells, the orchestrator and gateways handle the game's types as opaque MessagePack bytes (the gateway also calls `Game::welcome` and `Game::join`). Keep it that way: no game knowledge outside `group.rs` and `game.rs`.
-- **Actions are delivered on the next tick, exactly once, wherever the target is.** Anything touching delivery (`group.rs`: `route`, `forward`, `deliver_envelopes`, `first_delivery`) needs a test in `group/tests.rs` or `testing.rs`, including mid-handoff cases.
-- **The snapshot format is shared with TypeScript.** Changing `snapshot.rs` means changing `packages/client/src/snapshot.ts`, then running `WORLDMESH_WRITE_FIXTURES=1 cargo test -p worldmesh fixture` and the client's tests.
-- **Protocol types mirror TypeScript types** in `packages/client/src/protocol.ts`. Change both.
+- **Game code runs only in Server Entity Groups.** Cells, the orchestrator and gateways handle the game's types as opaque MessagePack bytes (the gateway also calls `Game::welcome` and `Game::join`). Keep it that way: no game knowledge outside `worldmesh-sim`.
+- **Actions are delivered on the next tick, exactly once, wherever the target is.** Anything touching delivery (`worldmesh-sim` `group.rs`: `route`, `forward`, `deliver_envelopes`, `first_delivery`) needs a test in `group/tests.rs` or `testing.rs`, including mid-handoff cases.
+- **The snapshot format is shared with TypeScript.** Changing `crates/worldmesh-gateway/src/snapshot.rs` means changing `packages/client/src/snapshot.ts`, then running `WORLDMESH_WRITE_FIXTURES=1 cargo test -p worldmesh-gateway fixture` and the client's tests.
+- **Protocol types mirror TypeScript types** in `packages/client/src/protocol.ts` (Rust side: `crates/worldmesh-core/src/protocol.rs`). Change both.
 - **MSRV is 1.87.** Don't use newer std APIs.
 - **Docs**: when behaviour or API changes, update the matching page in `docs/src/content/docs`, and the skills if they mention it.
 
