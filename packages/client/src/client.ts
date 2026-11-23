@@ -279,6 +279,10 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
   private handle(msg: ServerMsg<V, E, W>) {
     switch (msg.t) {
       case 'welcome':
+        // A new session (first connect or a reconnect): start from nothing.
+        for (const id of this.entities.keys()) this.emit('removed', id);
+        this.entities.clear();
+        this.clockOffset = undefined;
         this.me = msg.id;
         this.tickMs = msg.tick_ms;
         this.world = msg.world;

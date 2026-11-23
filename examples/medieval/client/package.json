@@ -1,0 +1,21 @@
+{
+  "name": "medieval-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "parity": "for hz in 10 20 30 60; do TICK_HZ=$hz cargo run -q -p medieval --example movement_vectors > /tmp/movement_vectors.json && node --experimental-strip-types scripts/check-movement.ts /tmp/movement_vectors.json || exit 1; done"
+  },
+  "dependencies": {
+    "@worldmesh/client": "^0.1.0",
+    "@worldmesh/debug": "^0.1.0",
+    "pixi.js": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

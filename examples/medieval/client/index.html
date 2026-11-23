@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Worldmesh: medieval example</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #14171c; }
+
+      /* Combat log: cross-group hits and anything involving you. */
+      .combat-log {
+        position: fixed; left: 12px; top: 150px; max-width: 560px; pointer-events: none;
+        font: 12px/1.5 system-ui, sans-serif; color: #f0efec; text-shadow: 0 1px 2px #000, 0 0 3px #000;
+      }
+      .combat-log div { transition: opacity 1s; }
+      .combat-log div.fade { opacity: 0; }
+
+      /* Hovering a unit: who simulates it and whose area it stands in. */
+      .hover-tip {
+        display: none; position: fixed; z-index: 5; pointer-events: none; padding: 6px 8px; background: #23272e;
+        border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; color: #c3c2b7;
+        font: 11px/1.5 system-ui, sans-serif; white-space: nowrap;
+      }
+      .hover-tip b { color: #f0efec; }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

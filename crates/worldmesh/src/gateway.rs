@@ -535,7 +535,9 @@ async fn handle_client_msg<G: Game>(state: &AppState<G>, id: EntityId, raw: &[u8
             let (at_tick, at_sub) = schedule_input(tick, sub, now_ms / time::tick_ms());
             let env = to_entity(id, Kind::Input { at_tick, sub: at_sub, input }, false);
             bus::publish(&state.nats, entity_subject(id), &env).await;
-            Some(ServerMsg::InputAck { tick, sub, early_ms: early_ms(tick, sub, substeps, now_ms) })
+            // Tick 0 ("as soon as possible") has no moment to be early for.
+            let early = if tick == 0 { 0 } else { early_ms(tick, sub, substeps, now_ms) };
+            Some(ServerMsg::InputAck { tick, sub, early_ms: early })
         }
         Ok(ClientMsg::Command { command }) => {
             // Addressed to the player's own entity: the bus delivers it to whichever group
