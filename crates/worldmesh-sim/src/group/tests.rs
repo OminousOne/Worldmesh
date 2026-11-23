@@ -582,10 +582,7 @@ fn questions_go_with_the_reports_and_answers_show_up_in_nearby() {
     let reports: BTreeMap<u32, GroupReport> = w.take_reports(1001).into_iter().collect();
     assert_eq!(reports[&WEST].queries.len(), 2);
     // The cell answers: entity 9 of group 2 stands next to entity 1.
-    let health = (
-        0,
-        bytes::Bytes::from(codec::to_bytes(&Health(50)).unwrap()),
-    );
+    let health = (0, bytes::Bytes::from(codec::to_bytes(&Health(50)).unwrap()));
     let seen = Seen {
         id: 9,
         x: 11.0,
