@@ -518,7 +518,7 @@ async fn finish_tick(nats: &async_nats::Client, world: &mut SpatialWorld, tick: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_bytes::ByteBuf;
+    use bytes::Bytes;
     use worldmesh_core::config::ViewShape;
     use worldmesh_core::protocol::{Facts, Reported};
 
@@ -568,8 +568,8 @@ mod tests {
     /// Two visible components: 0 (a byte from the id) and 1 (empty).
     fn entity(id: u32, x: f32, y: f32) -> Reported {
         let parts = vec![
-            (0, ByteBuf::from(vec![0x90 + (id % 10) as u8])),
-            (1, ByteBuf::new()),
+            (0, Bytes::from(vec![0x90 + (id % 10) as u8])),
+            (1, Bytes::new()),
         ];
         Reported {
             id,

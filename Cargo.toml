@@ -13,7 +13,7 @@ rust-version = "1.87"
 anyhow = "1"
 async-nats = "0.52"
 axum = { version = "0.8", features = ["ws"] }
-bytes = "1"
+bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 rmp-serde = "1"

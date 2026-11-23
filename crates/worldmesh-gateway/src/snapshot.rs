@@ -297,7 +297,7 @@ fn put_u32(out: &mut Vec<u8>, v: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_bytes::ByteBuf;
+    use bytes::Bytes;
 
     const SCALE: f32 = 1023.0;
 
@@ -422,7 +422,7 @@ mod tests {
     }
 
     fn part(c: u16, bytes: &[u8]) -> Part {
-        (c, ByteBuf::from(bytes.to_vec()))
+        (c, Bytes::from(bytes.to_vec()))
     }
 
     /// Two components: 0 is health (100), 1 is a name.
@@ -576,11 +576,11 @@ mod tests {
         let me = 7;
         let entity = |id: u32, x: f32, y: f32, group: u32, hp: u32, burning: bool| {
             let mut parts = vec![
-                (0, ByteBuf::from(to_bytes(&hp).unwrap())),
-                (1, ByteBuf::from(to_bytes(&format!("e{id}")).unwrap())),
+                (0, Bytes::from(to_bytes(&hp).unwrap())),
+                (1, Bytes::from(to_bytes(&format!("e{id}")).unwrap())),
             ];
             if burning {
-                parts.push((2, ByteBuf::from(to_bytes(&json!({ "ticks": 3 })).unwrap())));
+                parts.push((2, Bytes::from(to_bytes(&json!({ "ticks": 3 })).unwrap())));
             }
             ViewEntity {
                 id,

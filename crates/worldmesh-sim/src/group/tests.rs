@@ -584,7 +584,7 @@ fn questions_go_with_the_reports_and_answers_show_up_in_nearby() {
     // The cell answers: entity 9 of group 2 stands next to entity 1.
     let health = (
         0,
-        serde_bytes::ByteBuf::from(codec::to_bytes(&Health(50)).unwrap()),
+        bytes::Bytes::from(codec::to_bytes(&Health(50)).unwrap()),
     );
     let seen = Seen {
         id: 9,

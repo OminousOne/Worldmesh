@@ -503,7 +503,7 @@ impl Rules {
             if visible_only && !self.components[usize::from(id)].visible {
                 continue;
             }
-            parts.push((id, serde_bytes::ByteBuf::from(c.encode()?)));
+            parts.push((id, bytes::Bytes::from(c.encode()?)));
         }
         parts.sort_by_key(|(id, _)| *id);
         Some(parts)

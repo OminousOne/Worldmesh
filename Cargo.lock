@@ -2133,6 +2133,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-nats",
+ "bytes",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -2147,6 +2148,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-nats",
+ "bytes",
  "serde",
  "serde_bytes",
  "tokio",

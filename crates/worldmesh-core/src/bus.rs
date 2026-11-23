@@ -258,8 +258,8 @@ mod tests {
         };
         let bytes = vec![0x82, 0xa1, 0x61, 0x01, 0xa1, 0x62, 0xc3];
         let parts = vec![
-            (0, serde_bytes::ByteBuf::from(bytes.clone())),
-            (2, serde_bytes::ByteBuf::from(vec![0x05])),
+            (0, bytes::Bytes::from(bytes.clone())),
+            (2, bytes::Bytes::from(vec![0x05])),
         ];
         let envelopes = [
             Envelope {

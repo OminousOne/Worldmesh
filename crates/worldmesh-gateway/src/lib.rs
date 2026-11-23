@@ -644,7 +644,7 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_bytes::ByteBuf;
+    use bytes::Bytes;
     use serde_json::Value;
     use worldmesh_core::protocol::CellView;
     use worldmesh_sim::test_game::{self, Health, Hurt};
@@ -732,7 +732,7 @@ mod tests {
         let rules = test_game::rules();
         let health = rules.component_id::<Health>().unwrap();
         let mut e = entity(4, 2.0, 0x8001);
-        e.parts = vec![(health, ByteBuf::from(codec::to_bytes(&Health(90)).unwrap()))];
+        e.parts = vec![(health, Bytes::from(codec::to_bytes(&Health(90)).unwrap()))];
         let event = WireEvent {
             msg: rules.message_id::<Hurt>().unwrap(),
             body: codec::to_bytes(&Hurt { id: 4, hp: 90 }).unwrap(),

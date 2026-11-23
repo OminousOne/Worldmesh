@@ -18,8 +18,9 @@ pub type EntityId = u32;
 pub type GroupId = u32;
 
 /// One component of an entity, encoded: (component id, MessagePack). Ids index the world's
-/// [`Schema::components`].
-pub type Part = (u16, serde_bytes::ByteBuf);
+/// [`Schema::components`]. The bytes are shared, not copied, when a cell puts the same
+/// entity in many players' views.
+pub type Part = (u16, bytes::Bytes);
 
 /// The names behind the ids used on the wire, in id order. Sent to every player on connect.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
