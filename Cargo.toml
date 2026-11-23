@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/worldmesh", "examples/medieval/server"]
+members = ["crates/worldmesh", "examples/hello", "examples/medieval/server"]
 
 [workspace.package]
 version = "0.1.0"

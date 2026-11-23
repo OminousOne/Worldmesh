@@ -1,0 +1,57 @@
+/* A clean, Stripe-like look: one indigo accent, cool greys, generous type, quiet borders. */
+:root {
+  --sl-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  --sl-font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --sl-text-base: 1rem;
+  --sl-line-height: 1.7;
+  --sl-content-width: 46rem;
+  --sl-sidebar-width: 17rem;
+}
+:root[data-theme='light'],
+::backdrop {
+  --sl-color-accent-low: #e9e8ff;
+  --sl-color-accent: #635bff;
+  --sl-color-accent-high: #2e2a8f;
+  --sl-color-white: #0a2540;
+  --sl-color-gray-1: #1a2b42;
+  --sl-color-gray-2: #33475b;
+  --sl-color-gray-3: #556677;
+  --sl-color-gray-4: #8798ad;
+  --sl-color-gray-5: #c1ccd8;
+  --sl-color-gray-6: #e6ebf1;
+  --sl-color-gray-7: #f6f9fc;
+  --sl-color-black: #ffffff;
+}
+:root {
+  --sl-color-accent-low: #1f1d4a;
+  --sl-color-accent: #8f88ff;
+  --sl-color-accent-high: #d6d3ff;
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #e6ebf1;
+  --sl-color-gray-2: #c1ccd8;
+  --sl-color-gray-3: #8798ad;
+  --sl-color-gray-4: #556677;
+  --sl-color-gray-5: #33475b;
+  --sl-color-gray-6: #1a2b42;
+  --sl-color-black: #0a1626;
+}
+.sl-markdown-content h2 {
+  margin-top: 2.6rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--sl-color-gray-6);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sl-markdown-content h3 { font-weight: 600; }
+.sl-markdown-content :is(h1, h2, h3) { letter-spacing: -0.015em; }
+.sl-markdown-content pre { border-radius: 8px; }
+.sl-markdown-content table { font-size: 0.9rem; }
+.sl-markdown-content code:not(pre code) {
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.85em;
+}
+.hero h1 { letter-spacing: -0.03em; }
+.card { border-radius: 10px; }
