@@ -122,16 +122,25 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
   private debug: boolean;
 
   private options: ClientOptions<S, I, V>;
-  private handlers: ClientHandlers<V, E, W>;
+  private listeners: ClientHandlers<V, E, W>[] = [];
 
   constructor(options: ClientOptions<S, I, V>, handlers: ClientHandlers<V, E, W> = {}) {
     this.options = options;
-    this.handlers = handlers;
+    this.listeners.push(handlers);
     this.compact = options.compact ?? true;
     this.debug = options.debug ?? false;
     if (options.prediction) {
       this.predictor = new Predictor(options.prediction, { substeps: 16, tickMs: this.tickMs, serverClock: () => this.serverClock() });
     }
+  }
+
+  /** Also call these handlers (say, a debug panel's). */
+  listen(handlers: ClientHandlers<V, E, W>) {
+    this.listeners.push(handlers);
+  }
+
+  private emit<K extends keyof ClientHandlers<V, E, W>>(name: K, ...args: Parameters<NonNullable<ClientHandlers<V, E, W>[K]>>) {
+    for (const l of this.listeners) (l[name] as ((...a: typeof args) => void) | undefined)?.(...args);
   }
 
   get settings() {
@@ -240,7 +249,7 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
 
   private setStatus(status: Status) {
     this.status = status;
-    this.handlers.status?.(status);
+    this.emit('status', status);
   }
 
   private receive(data: ArrayBuffer | string) {
@@ -275,7 +284,7 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
         this.world = msg.world;
         this.welcome = msg;
         this.predictor?.configure({ tickMs: msg.tick_ms, substeps: msg.world.input_substeps });
-        this.handlers.welcome?.(msg);
+        this.emit('welcome', msg);
         break;
       case 'snapshot':
         this.applySnapshot(msg);
@@ -283,14 +292,14 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
       case 'ownership': {
         const { t: _, ...assignment } = msg;
         this.assignment = assignment;
-        this.handlers.ownership?.(assignment);
+        this.emit('ownership', assignment);
         break;
       }
       case 'input_ack':
         this.predictor?.onAck(msg.tick, msg.sub, msg.early_ms);
         break;
       case 'stats':
-        this.handlers.stats?.(msg.processes);
+        this.emit('stats', msg.processes);
         break;
     }
   }
@@ -312,9 +321,9 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
       if (!e) {
         e = { state: s, samples: [], lastSeen: serverTime };
         this.entities.set(s.id, e);
-        this.handlers.added?.(e);
+        this.emit('added', e);
       } else if (e.state.group !== s.group && e.state.group) {
-        this.handlers.handoff?.(s.id, e.state.group, s.group);
+        this.emit('handoff', s.id, e.state.group, s.group);
       }
       e.state = s;
       e.lastSeen = serverTime;
@@ -332,10 +341,10 @@ export class WorldmeshClient<V = unknown, E = unknown, W = unknown, I = unknown,
     for (const [id, e] of this.entities) {
       if (serverTime - e.lastSeen > 500) {
         this.entities.delete(id);
-        this.handlers.removed?.(id);
+        this.emit('removed', id);
       }
     }
     this.lastTick = tick;
-    this.handlers.snapshot?.(msg);
+    this.emit('snapshot', msg);
   }
 }
