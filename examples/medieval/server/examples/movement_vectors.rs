@@ -25,7 +25,10 @@ fn random_dir(seed: &mut u64) -> (f32, f32) {
 }
 
 fn main() {
-    let hz = std::env::var("TICK_HZ").ok().and_then(|v| v.parse().ok()).unwrap_or(time::DEFAULT_TICK_HZ);
+    let hz = std::env::var("TICK_HZ")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(time::DEFAULT_TICK_HZ);
     let tick_ms = time::set_tick_hz(hz);
     let map = generate(WORLD_SEED, MAP_WIDTH, MAP_HEIGHT);
     let (cx, cy) = map.center();
@@ -52,9 +55,15 @@ fn main() {
         changes.sort_by_key(|c| c.0);
 
         let (nx, ny, ndir) = simulate_tick(&map, x, y, dir, &changes);
-        let mut row: Vec<String> = [x, y, dir.0, dir.1, nx, ny, ndir.0, ndir.1].map(|v| v.to_bits().to_string()).to_vec();
+        let mut row: Vec<String> = [x, y, dir.0, dir.1, nx, ny, ndir.0, ndir.1]
+            .map(|v| v.to_bits().to_string())
+            .to_vec();
         for (sub, (cdx, cdy)) in &changes {
-            row.extend([sub.to_string(), cdx.to_bits().to_string(), cdy.to_bits().to_string()]);
+            row.extend([
+                sub.to_string(),
+                cdx.to_bits().to_string(),
+                cdy.to_bits().to_string(),
+            ]);
         }
         ticks.push(format!("[{}]", row.join(",")));
         (x, y, dir) = (nx, ny, ndir);

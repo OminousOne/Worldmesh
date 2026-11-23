@@ -1,10 +1,75 @@
-//! Movement rules. The server runs these authoritatively and the client runs the same rules
-//! (ported to TypeScript) to predict its own player. Positions are in tiles as f32:
-//! tile (x, y) covers [x, x + 1) by [y, y + 1).
+//! Movement: the [`Movement`] plugin, and the rules it runs. The server runs these
+//! authoritatively and the client runs the same rules (ported to TypeScript) to predict its
+//! own player. Positions are in tiles as f32: tile (x, y) covers [x, x + 1) by [y, y + 1).
+//!
+//! Anything with a [`Heading`] walks: players by their [`Move`] inputs, bots by whatever sets
+//! their heading. Anything [`Immobile`] (the dead, say) turns but doesn't walk.
 
-use worldmesh::time;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use worldmesh::{time, Bundle, Component, Me, Plugin, Stage, World};
 
 use crate::map::MapData;
+
+/// The direction held at the end of the last tick (length at most 1).
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Heading {
+    pub dx: f32,
+    pub dy: f32,
+}
+
+/// Doesn't walk while it has this (it still turns, so it walks the right way once it can).
+#[derive(Component, Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Immobile;
+
+/// A player's input: the direction to walk in (length at most 1; zero to stop).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Move {
+    pub dx: f32,
+    pub dy: f32,
+}
+
+/// Walking on the map, for heroes and bots.
+pub struct Movement {
+    pub map: Arc<MapData>,
+}
+
+impl Plugin for Movement {
+    fn build(&self, world: &mut World) {
+        let map = self.map.clone();
+        world
+            .component::<Heading>()
+            .component::<Immobile>()
+            .input::<Move>()
+            .system_for::<Heading>(Stage::Update, move |me| walk(&map, me))
+            .kind("hero", Bundle::new().with(Heading::default()))
+            .kind("bot", Bundle::new().with(Heading::default()));
+    }
+}
+
+/// One tick of walking, switching direction at the exact sub-step each input asked for.
+fn walk(map: &MapData, me: &mut Me<'_>) {
+    let changes: Vec<Change> = me
+        .inputs::<Move>()
+        .iter()
+        .map(|t| (t.sub, sanitize_dir(t.input.dx, t.input.dy)))
+        .collect();
+    let Some(&Heading { dx, dy }) = me.get::<Heading>() else {
+        return;
+    };
+    let end = if me.has::<Immobile>() {
+        changes.last().map(|c| c.1).unwrap_or((dx, dy))
+    } else {
+        let (x, y, end) = simulate_tick(map, me.x, me.y, (dx, dy), &changes);
+        (me.x, me.y) = (x, y);
+        end
+    };
+    me.insert(Heading {
+        dx: end.0,
+        dy: end.1,
+    });
+}
 
 pub const SPEED_TILES_PER_SEC: f32 = 5.0;
 /// Distance covered in one tick, which depends on the tick rate.
@@ -66,7 +131,13 @@ pub fn step_part(map: &MapData, x: f32, y: f32, dx: f32, dy: f32, part: f32) -> 
 /// One whole tick for a player who starts it moving in `dir` and changes direction at
 /// each sub-step in `changes` (sorted by sub-step). Returns the new position and the
 /// direction held at the end of the tick. Server and client both run exactly this.
-pub fn simulate_tick(map: &MapData, x: f32, y: f32, dir: (f32, f32), changes: &[Change]) -> (f32, f32, (f32, f32)) {
+pub fn simulate_tick(
+    map: &MapData,
+    x: f32,
+    y: f32,
+    dir: (f32, f32),
+    changes: &[Change],
+) -> (f32, f32, (f32, f32)) {
     let (mut x, mut y, mut dir) = (x, y, dir);
     let mut from = 0u8;
     for &(at, next) in changes {
@@ -86,7 +157,14 @@ fn segment(map: &MapData, x: f32, y: f32, dir: (f32, f32), from: u8, to: u8) -> 
     if to <= from || (dir.0 == 0.0 && dir.1 == 0.0) {
         return (x, y);
     }
-    step_part(map, x, y, dir.0, dir.1, (to - from) as f32 / SUBSTEPS as f32)
+    step_part(
+        map,
+        x,
+        y,
+        dir.0,
+        dir.1,
+        (to - from) as f32 / SUBSTEPS as f32,
+    )
 }
 
 /// Largest part of `delta` that can be moved while `clear` holds. A tick's move is
@@ -120,7 +198,11 @@ mod tests {
         for y in 0..10 {
             tiles[y * 10 + 6] = Tile::Wall as u8;
         }
-        MapData { width: 10, height: 10, tiles }
+        MapData {
+            width: 10,
+            height: 10,
+            tiles,
+        }
     }
 
     fn close(a: f32, b: f32) -> bool {
@@ -142,7 +224,10 @@ mod tests {
         for (dx, dy) in [(1.0, 1.0), (0.0, -3.0), (-2.0, 5.0), (0.6, 0.8)] {
             let (nx, ny) = step(&map, x, y, dx, dy);
             let dist = ((nx - x).powi(2) + (ny - y).powi(2)).sqrt();
-            assert!(close(dist, speed_per_tick()), "dir ({dx}, {dy}) moved {dist}");
+            assert!(
+                close(dist, speed_per_tick()),
+                "dir ({dx}, {dy}) moved {dist}"
+            );
         }
     }
 

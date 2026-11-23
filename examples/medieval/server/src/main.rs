@@ -3,5 +3,5 @@
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    worldmesh::run(medieval::Medieval::new()).await
+    worldmesh::run(medieval::world()).await
 }

@@ -61,7 +61,8 @@ impl MapData {
     /// Where player `id` (re)appears: around the town centre, spread over a 5 x 5 patch.
     pub fn spawn_point(&self, id: u32) -> (f32, f32) {
         let (cx, cy) = self.center();
-        let (tx, ty) = self.nearest_walkable(cx + (id % 5) as i32 - 2, cy + ((id / 5) % 5) as i32 - 2);
+        let (tx, ty) =
+            self.nearest_walkable(cx + (id % 5) as i32 - 2, cy + ((id / 5) % 5) as i32 - 2);
         crate::movement::tile_center(tx, ty)
     }
 
@@ -97,7 +98,9 @@ pub use worldmesh::codec::splitmix64;
 /// Value noise in [0, 1) on an integer lattice, smoothed between lattice points.
 fn noise(seed: u64, x: i32, y: i32, scale: i32) -> f64 {
     let lattice = |lx: i32, ly: i32| -> f64 {
-        let h = splitmix64(seed ^ (lx as u64).wrapping_mul(0x9E37_79B1) ^ (ly as u64).wrapping_mul(0x85EB_CA77));
+        let h = splitmix64(
+            seed ^ (lx as u64).wrapping_mul(0x9E37_79B1) ^ (ly as u64).wrapping_mul(0x85EB_CA77),
+        );
         (h >> 11) as f64 / (1u64 << 53) as f64
     };
     let (gx, gy) = (x.div_euclid(scale), y.div_euclid(scale));
@@ -110,7 +113,11 @@ fn noise(seed: u64, x: i32, y: i32, scale: i32) -> f64 {
 }
 
 pub fn generate(seed: u64, width: u32, height: u32) -> MapData {
-    let mut map = MapData { width, height, tiles: vec![Tile::Grass as u8; (width * height) as usize] };
+    let mut map = MapData {
+        width,
+        height,
+        tiles: vec![Tile::Grass as u8; (width * height) as usize],
+    };
     let (w, h) = (width as i32, height as i32);
 
     // Terrain: lakes from low noise, sandy paths around their shores.

@@ -1,16 +1,22 @@
-//! Bot AI, run by whichever group simulates the bot. A bot knows its own group's units
-//! exactly and everyone else from its latest "what's near me?" answer (a tick or two old),
-//! and acts exactly like a player does: through [`Medieval::use_ability`]. Its randomness is
-//! seeded by (world, bot, tick), so moving to another group never changes what it decides.
+//! Bots: the [`Bots`] plugin. Bot AI runs in whichever group simulates the bot. A bot knows
+//! its own group's units exactly and everyone else from its latest "what's near me?" answer
+//! (a tick or two old), and fights exactly like a player does: through
+//! [`combat::use_ability`]. Its randomness is seeded by (world, bot, tick), so moving to
+//! another group never changes what it decides.
+//!
+//! It works with the other plugins only through their components: it steers by setting its
+//! [`Heading`], reads [`Dead`] and [`LastHit`], and sets [`Fighting`].
+
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use worldmesh::protocol::Facts;
-use worldmesh::{time, EntityId, Me};
+use worldmesh::{
+    time, Bundle, Component, EntityId, Me, Message, Plugin, Query, Spawn, Stage, To, World,
+};
 
-use crate::combat::{distance, Ability};
-use crate::game::{Medieval, Target};
-use crate::map::splitmix64;
-use crate::movement;
+use crate::combat::{self, distance, Ability, Dead, Fighting, LastHit, Target};
+use crate::map::{splitmix64, MapData};
+use crate::movement::{self, Heading};
 use crate::WORLD_SEED;
 
 /// How far an idle bot looks for a fight. Has nothing to do with ability ranges.
@@ -39,8 +45,8 @@ pub enum BotMode {
     Wander,
 }
 
-/// A bot's state of mind. Part of its unit's data, so it travels with it between groups.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+/// A bot's state of mind. A component, so it travels with the bot between groups.
+#[derive(Component, Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Brain {
     pub mode: BotMode,
     /// Where it's wandering to, and when it gives up.
@@ -55,7 +61,10 @@ pub struct Brain {
 
 impl Brain {
     pub fn new(mode: BotMode) -> Self {
-        Self { mode, ..Self::default() }
+        Self {
+            mode,
+            ..Self::default()
+        }
     }
 
     fn fights(&self) -> bool {
@@ -63,53 +72,111 @@ impl Brain {
     }
 }
 
-/// What bot `me` knows of unit `id`: (x, y, dead). Exact if it's in this group, otherwise from
-/// its senses, or where it stood when it hit us.
-fn sense(me: &Me<'_, Medieval>, id: EntityId) -> Option<(f32, f32, bool)> {
-    if let Some(n) = me.find(id) {
-        return Some((n.x, n.y, n.view.dead));
-    }
-    let felt = me.data.bot.as_ref()?.felt?;
-    (felt.0 == id && felt.3 + time::ticks_in(FELT_FOR_MS) >= me.tick()).then_some((felt.1, felt.2, false))
+/// A player's command: add bots at random places (a testing tool, in the example's debug panel).
+#[derive(Message, Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct SpawnBots {
+    pub count: u32,
+    pub mode: BotMode,
 }
 
-/// The nearest living unit bot `me` knows of within `radius`.
-fn nearest_other(me: &Me<'_, Medieval>, radius: f32) -> Option<EntityId> {
+/// A player's command: remove every bot in the world.
+#[derive(Message, Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct ClearBots;
+
+/// Sent to everyone by [`ClearBots`]: bots leave the world.
+#[derive(Message, Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Vanish;
+
+/// Most bots one [`SpawnBots`] adds.
+pub const MAX_BOTS_PER_SPAWN: u32 = 200;
+
+/// Bots that wander, pick fights and fight back.
+pub struct Bots {
+    pub map: Arc<MapData>,
+}
+
+impl Plugin for Bots {
+    fn build(&self, world: &mut World) {
+        let (think_map, spawn_map) = (self.map.clone(), self.map.clone());
+        world
+            .component::<Brain>()
+            .command(move |me, s: &SpawnBots| spawn_bots(&spawn_map, me, s))
+            .command(|me, _: &ClearBots| {
+                me.send(To::Everyone, Vanish);
+            })
+            .action(|me, _: &Vanish, _| {
+                if me.has::<Brain>() {
+                    me.despawn();
+                }
+            })
+            .system_for::<Brain>(Stage::First, move |me| think(&think_map, me))
+            .system_for::<Brain>(Stage::Last, ask)
+            .kind("bot", Bundle::new().with(Brain::default()));
+    }
+}
+
+fn spawn_bots(map: &MapData, me: &mut Me<'_>, &SpawnBots { count, mode }: &SpawnBots) {
+    let seed = splitmix64(me.tick() ^ (u64::from(me.id) << 40) ^ me.trace());
+    for i in 0..count.min(MAX_BOTS_PER_SPAWN) {
+        let (x, y) = map.random_point(splitmix64(seed ^ u64::from(i)));
+        me.spawn(Spawn::new("bot", x, y).with(Brain::new(mode)));
+    }
+}
+
+/// What `me` knows of unit `id`: (x, y, dead). Exact if it's in this group, otherwise from its
+/// senses, or where it stood when it hit us.
+fn sense(me: &Me<'_>, brain: &Brain, id: EntityId) -> Option<(f32, f32, bool)> {
+    if let Some(n) = me.find(id) {
+        return Some((n.x, n.y, n.has::<Dead>()));
+    }
+    let felt = brain.felt?;
+    (felt.0 == id && felt.3 + time::ticks_in(FELT_FOR_MS) >= me.tick())
+        .then_some((felt.1, felt.2, false))
+}
+
+/// The nearest living unit `me` knows of within `radius`.
+fn nearest_other(me: &Me<'_>, radius: f32) -> Option<EntityId> {
     let (x, y) = (me.x, me.y);
     me.nearby(radius)
         .into_iter()
-        .filter(|n| !n.view.dead)
-        .min_by(|a, b| distance(x, y, a.x, a.y).total_cmp(&distance(x, y, b.x, b.y)).then(a.id.cmp(&b.id)))
+        .filter(|n| !n.has::<Dead>())
+        .min_by(|a, b| {
+            distance(x, y, a.x, a.y)
+                .total_cmp(&distance(x, y, b.x, b.y))
+                .then(a.id.cmp(&b.id))
+        })
         .map(|n| n.id)
 }
 
-/// A bot was hit: it knows where the attacker stood, and fights back unless it never fights.
-pub fn felt(me: &mut Me<'_, Medieval>, attacker: &Facts) {
-    let Some(brain) = &mut me.data.bot else { return };
-    if !brain.fights() {
-        return;
-    }
-    brain.felt = Some((attacker.id, attacker.x, attacker.y, attacker.tick));
-    if me.data.target.is_none() {
-        me.data.target = Some(attacker.id);
-    }
-}
-
 /// Decide where to go and what to use this tick.
-pub fn think(game: &Medieval, me: &mut Me<'_, Medieval>) {
-    if me.data.dead_until.is_some() {
+fn think(map: &MapData, me: &mut Me<'_>) {
+    let Some(mut brain) = me.get::<Brain>().cloned() else {
+        return;
+    };
+    if me.has::<Dead>() {
+        // Nothing to do; it comes back somewhere else with a fresh mind.
+        (brain.wander, brain.felt) = (None, None);
+        me.insert(brain);
         return;
     }
-    let Some(mut brain) = me.data.bot.clone() else { return };
+    // Hit since we last thought: remember where from, and fight back (unless we never fight).
+    if let Some(hit) = me.remove::<LastHit>() {
+        if brain.fights() {
+            brain.felt = Some((hit.by, hit.x, hit.y, hit.tick));
+            if !me.has::<Fighting>() {
+                me.insert(Fighting(hit.by));
+            }
+        }
+    }
     let tick = me.tick();
     let (id, x, y) = (me.id, me.x, me.y);
     let rng = splitmix64(WORLD_SEED ^ (u64::from(id) << 32) ^ tick);
 
     // Keep a target only while it can be sensed, alive and close; aggressive bots look for one.
-    let mut target = me
-        .data
-        .target
-        .filter(|&t| sense(me, t).is_some_and(|(tx, ty, dead)| !dead && distance(x, y, tx, ty) <= CHASE_RANGE));
+    let mut target = me.get::<Fighting>().map(|f| f.0).filter(|&t| {
+        sense(me, &brain, t)
+            .is_some_and(|(tx, ty, dead)| !dead && distance(x, y, tx, ty) <= CHASE_RANGE)
+    });
     if !brain.fights() {
         target = None;
     }
@@ -119,7 +186,7 @@ pub fn think(game: &Medieval, me: &mut Me<'_, Medieval>) {
 
     let mut dir = (0.0, 0.0);
     let mut action = None;
-    if let Some((t, (tx, ty, _))) = target.and_then(|t| sense(me, t).map(|s| (t, s))) {
+    if let Some((t, (tx, ty, _))) = target.and_then(|t| sense(me, &brain, t).map(|s| (t, s))) {
         let dist = distance(x, y, tx, ty);
         // Sword up close; otherwise now and then a fireball, else the bow.
         action = Some(if dist <= Ability::Sword.stats().range {
@@ -136,47 +203,77 @@ pub fn think(game: &Medieval, me: &mut Me<'_, Medieval>) {
     } else if let Some((wx, wy)) = brain.wander {
         let dist = distance(x, y, wx, wy);
         // Bots walk straight at their spot; one stuck on a wall picks another right away.
-        let stuck = me.data.dir != (0.0, 0.0) && brain.last_pos == (x, y);
+        let moving = me
+            .get::<Heading>()
+            .is_some_and(|h| (h.dx, h.dy) != (0.0, 0.0));
+        let stuck = moving && brain.last_pos == (x, y);
         if stuck {
             brain.wander = None;
             brain.idle_until = tick;
         } else if dist < 0.5 || tick >= brain.wander_until {
             brain.wander = None;
             // Wanderers barely stop; the others rest 0.5 to 3 s.
-            let rest = if brain.mode == BotMode::Wander { 100 + (rng >> 16) % 400 } else { 500 + (rng >> 16) % 2500 };
+            let rest = if brain.mode == BotMode::Wander {
+                100 + (rng >> 16) % 400
+            } else {
+                500 + (rng >> 16) % 2500
+            };
             brain.idle_until = tick + time::ticks_in(rest);
         } else {
             dir = ((wx - x) / dist, (wy - y) / dist);
         }
     } else if tick >= brain.idle_until {
         // Wander somewhere within 10 tiles (wanderers: 16).
-        let reach: u64 = if brain.mode == BotMode::Wander { 16 } else { 10 };
+        let reach: u64 = if brain.mode == BotMode::Wander {
+            16
+        } else {
+            10
+        };
         let ox = ((rng >> 8) % (2 * reach + 1)) as i32 - reach as i32;
         let oy = ((rng >> 24) % (2 * reach + 1)) as i32 - reach as i32;
-        let (tx, ty) = game.map.nearest_walkable(x as i32 + ox, y as i32 + oy);
+        let (tx, ty) = map.nearest_walkable(x as i32 + ox, y as i32 + oy);
         brain.wander = Some(movement::tile_center(tx, ty));
         brain.wander_until = tick + time::ticks_in(8000);
     }
 
     brain.last_pos = (x, y);
-    me.data.dir = movement::sanitize_dir(dir.0, dir.1);
-    (me.data.target, me.data.bot) = (target, Some(brain));
+    let (dx, dy) = movement::sanitize_dir(dir.0, dir.1);
+    me.insert(Heading { dx, dy });
+    match target {
+        Some(t) => me.insert(Fighting(t)),
+        None => {
+            me.remove::<Fighting>();
+        }
+    }
+    me.insert(brain);
     if let Some((ability, aim)) = action {
-        game.use_ability(me, ability, aim);
+        combat::use_ability(map, me, ability, aim);
     }
 }
 
 /// Bots that care what's around them (aggressive, or after someone) ask, from where they
 /// ended up this tick; wanderers never do. Staggered, so not every bot asks on the same tick.
-pub fn ask(me: &mut Me<'_, Medieval>) {
-    let Some(brain) = &me.data.bot else { return };
+/// They only need to know who's dead, so that's the only component they ask for.
+fn ask(me: &mut Me<'_>) {
+    let Some(mode) = me.get::<Brain>().map(|b| b.mode) else {
+        return;
+    };
     let every = time::ticks_in(SENSE_EVERY_MS).max(1);
     let due = (me.tick() + u64::from(me.id)).is_multiple_of(every);
-    let cares = brain.mode == BotMode::Aggressive || me.data.target.is_some();
-    if !due || me.data.dead_until.is_some() || !cares {
+    let target = me.get::<Fighting>().map(|f| f.0);
+    let cares = mode == BotMode::Aggressive || target.is_some();
+    if !due || me.has::<Dead>() || !cares {
         return;
     }
-    let target = me.data.target;
-    let r = if target.is_some() { CHASE_RANGE } else { SENSE_RANGE };
-    me.query_with(r, SENSE_NEAREST, target);
+    let mut query = Query::within(if target.is_some() {
+        CHASE_RANGE
+    } else {
+        SENSE_RANGE
+    })
+    .nearest(SENSE_NEAREST)
+    .with::<Dead>();
+    if let Some(t) = target {
+        query = query.target(t);
+    }
+    me.query(query);
 }
