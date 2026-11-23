@@ -1,0 +1,75 @@
+name: worldmesh-medieval
+
+# The medieval example's whole world: the bus, the orchestrator, Server Entity Groups, Spatial
+# Layer Cells, a gateway and the browser client. From the repository root: `make example`
+# (or `docker compose -f examples/medieval/docker-compose.yml up --build`), then open
+# http://localhost:5173
+#
+# Groups have no limit (each group process runs as many as asked for). More Spatial Layer
+# Cells to scale into: add `--scale spatial=4`. Another tick rate (every process must agree):
+# TICK_HZ=20 make example
+
+x-server: &server
+  build:
+    context: ../..
+    dockerfile: examples/medieval/Dockerfile
+  environment: &server-env
+    NATS_URL: nats://nats:4222
+    RUST_LOG: info
+    TICK_HZ: ${TICK_HZ:-10} # simulation ticks per second
+  depends_on:
+    - nats
+
+services:
+  nats:
+    image: nats:latest
+    command: ["-m", "8222"] # monitoring at http://localhost:8222
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  # Picks which groups and Spatial Layer Cells are in use (2 of each to start; change both
+  # live from the debug panel) and places entities in groups.
+  orchestrator:
+    <<: *server
+    command: ["orchestrator", "--groups", "2", "--spatial", "2"]
+
+  # Server Entity Groups: simulate entities, wherever they stand. Each process starts with one
+  # group and runs as many more as the orchestrator asks for.
+  group:
+    <<: *server
+    command: ["group"]
+    deploy:
+      replicas: 2
+
+  # Spatial Layer Cells: own areas, answer "what's near here?", build players' views.
+  spatial:
+    <<: *server
+    command: ["spatial"]
+    deploy:
+      replicas: 3
+
+  # --allow-debug lets the debug panel scale the world and add fake lag: development only.
+  gateway:
+    <<: *server
+    command: ["gateway", "--listen", "0.0.0.0:8080", "--allow-debug"]
+    environment:
+      <<: *server-env
+      NATS_MONITOR: nats:8222 # puts NATS itself in the debug graphs
+    ports:
+      - "8080:8080"
+
+  client:
+    image: node:22-alpine
+    working_dir: /repo
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -w medieval-client -- --host 0.0.0.0 --port 5173 --strictPort"
+    environment:
+      VITE_GATEWAY_URL: ws://localhost:8080/ws
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../..:/repo
+      - node_modules:/repo/node_modules # keep Linux node_modules out of your folder
+
+volumes:
+  node_modules:
