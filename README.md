@@ -8,7 +8,7 @@ Worldmesh is a networking library written in Rust, with a TypeScript client for 
 
 ## How it works
 
-You implement one trait, `Game`: what an entity holds, what players send, what entities do to each other, and one tick of one entity. Worldmesh runs it across:
+Worldmesh is the networking, and none of the game. Every entity gets an id, a position and a kind; everything else (health, movement, inventory, AI) is components and code your game adds as plugins. Worldmesh runs them across:
 
 - **Server Entity Groups**, which simulate entities wherever they stand (balanced by count, so a crowd spreads over as many groups as it takes), and hand them to each other live;
 - **Spatial Layer Cells**, which own areas of the map and answer "what's near me?", route actions aimed at an area, and build players' views;
@@ -18,28 +18,37 @@ You implement one trait, `Game`: what an entity holds, what players send, what e
 all talking over [NATS](https://nats.io). An action sent to an entity on another machine, even one moving between servers, lands exactly once on the next tick.
 
 ```rust
-impl Game for Tag {
-    type Data = Player;     // what an entity holds
-    type View = Look;       // what others see of it
-    type Input = Walk;      // what a player holds down
-    type Command = Command; // what a player asks for
-    type Action = Action;   // what entities do to each other
-    type Event = Event;     // what players see happen
-    type Welcome = ();
+#[derive(Component, Clone, Copy, PartialEq, Serialize, Deserialize)]
+struct It(bool);                  // a component: part of an entity's state
 
-    fn tick(&self, me: &mut Me<'_, Self>, inputs: &[Timed<Walk>]) { /* walk */ }
+#[derive(Message, Clone, Serialize, Deserialize)]
+struct Tag { target: EntityId }   // a command, from a player
 
-    fn on_command(&self, me: &mut Me<'_, Self>, Command::Tag { target }: Command) {
-        if me.data.it {
-            me.send(To::Entity(target), Action::YouAreIt); // wherever the target is
-        }
+#[derive(Message, Clone, Serialize, Deserialize)]
+struct YouAreIt;                  // an action, from one entity to another
+
+struct TagGame;
+
+impl Plugin for TagGame {
+    fn build(&self, world: &mut World) {
+        world
+            .visible::<It>()                          // players can see who's it
+            .command(|me, tag: &Tag| {
+                if me.get::<It>() == Some(&It(true)) {
+                    me.send(To::Entity(tag.target), YouAreIt); // wherever the target is
+                }
+            })
+            .action(|me, _: &YouAreIt, from| { /* in reach of `from`? then me.insert(It(true)) */ })
+            .kind("player", Bundle::new().with(It(false)))
+            .join(|player| Spawn::new("player", 30.5, 32.5));
     }
-    // config, welcome, join, view, on_action: see examples/hello
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    worldmesh::run(Tag).await // `tag orchestrator`, `tag group`, `tag spatial`, `tag gateway`
+    let mut world = World::new(WorldConfig::default());
+    world.plugin(TagGame);
+    worldmesh::run(world).await // `tag orchestrator`, `tag group`, `tag spatial`, `tag gateway`
 }
 ```
 
@@ -55,11 +64,11 @@ make example   # Docker: NATS, every server role, and the client. Open http://lo
 
 | Path | What |
 | --- | --- |
-| [`crates/worldmesh`](crates/worldmesh) | The library |
+| [`crates/worldmesh`](crates/worldmesh) | The library (one crate per role under [`crates/`](crates), put together here) |
 | [`packages/client`](packages/client) | `@worldmesh/client`: connection, snapshots, interpolation, prediction |
 | [`packages/debug`](packages/debug) | `@worldmesh/debug`: the debug panel |
-| [`examples/hello`](examples/hello) | Tag: the smallest complete game |
-| [`examples/medieval`](examples/medieval) | Swords, bows, fireballs and bots: server, Pixi client, Docker |
+| [`examples/hello`](examples/hello) | Tag: the smallest complete game, one plugin |
+| [`examples/medieval`](examples/medieval) | Swords, bows, fireballs and bots as Movement, Combat and Bots plugins: server, Pixi client, Docker |
 | [`docs`](docs) | The documentation site |
 | [`skills`](skills) | Agent skills for building on Worldmesh |
 

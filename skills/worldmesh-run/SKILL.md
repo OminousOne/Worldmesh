@@ -43,7 +43,7 @@ Manual for now: from the debug panel (Groups +/-, Spatial Layer Cells +/-, or ty
 | A player vanishes and comes back after ~3 s | Their group died or stalled; the gateway re-joined them. Check that group's log and load |
 | Others stutter, own entity fine | Snapshots arriving late: gateway or cell overloaded, or network. Check cell load and gateway CPU |
 | Own entity corrects (snaps back) often | Inputs arriving late (see the panel's "last input arrived ... late"), or client movement code not bit-identical to the server |
-| Bus traffic very high | Big "what's near me?" answers: prune with `query_with`, ask less often, shrink `View` (see the metrics' "Bus traffic by kind") |
+| Bus traffic very high | Big "what's near me?" answers: ask only for the components you read (`Query::with::<T>()`), fewer entities (`.nearest(n)`), less often, and make fewer components visible (see the metrics' "Bus traffic by kind") |
 | Actions applied late (+2 ticks or more) | A group is lagging (load near 100%, or fake lag left on: check the group legend) |
 | Debug panel controls do nothing | Gateway not started with `--allow-debug` |
 

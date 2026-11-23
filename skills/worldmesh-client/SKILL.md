@@ -5,34 +5,36 @@ description: Connect a browser game client to a Worldmesh world with @worldmesh/
 
 # A browser client for a Worldmesh game
 
-`@worldmesh/client` connects to a gateway (`ws://host:8080/ws`), decodes snapshots into plain objects with the game's views and events, interpolates others, and predicts your own entity. It draws nothing: use any renderer. `@worldmesh/debug` adds a development panel. Working example: `examples/medieval/client` (Pixi). Docs: https://ominousone.github.io/Worldmesh/guides/client/
+`@worldmesh/client` connects to a gateway (`ws://host:8080/ws`), decodes snapshots into plain objects with each entity's kind and visible components and the game's events, all by name, interpolates others, and predicts your own entity. It draws nothing: use any renderer. `@worldmesh/debug` adds a development panel. Working example: `examples/medieval/client` (Pixi). Docs: https://ominousone.github.io/Worldmesh/guides/client/
 
 ## Types first
 
-Mirror the server's serde types in TypeScript exactly (field names, `k` tags, snake_case):
+Mirror the server's serde types in TypeScript, keyed by the names the server's plugins registered them under (snake_case of the Rust type unless `#[worldmesh(name = "...")]` says otherwise):
 
 ```ts
-type Look = { hp: number; dead: boolean };                       // Game::View
-type Event = { k: 'hit'; target: number; damage: number; trace: number };
-type Move = { dx: number; dy: number };                          // Game::Input
-type Command = { k: 'attack'; target: number };                  // Game::Command
-type Welcome = { map: { width: number; height: number; tiles: number[] } };
+type Components = { health?: number; dead?: { until: number } };      // visible components; absent = it doesn't have it
+type Events = { hit: { target: number; damage: number; trace: number } };
+type Move = { dx: number; dy: number };                                // the world's input
+type Commands = { attack: { target: number }; clear_bots: null };     // unit structs are null
+type Welcome = { map: { width: number; height: number; tiles: number[] } }; // world.welcome("map", ...)
 ```
+
+Newtype components (`struct Health(u16)`) arrive as the inner value (`health: 80`).
 
 ## Connect and draw
 
 ```ts
 import { WorldmeshClient } from '@worldmesh/client';
 
-const client = new WorldmeshClient<Look, Event, Welcome, Move, Command, State>(
-  { url: 'ws://localhost:8080/ws', prediction: rules, shouldPredict: (own) => !own.view.dead },
+const client = new WorldmeshClient<Components, Events, Welcome, Move, Commands, State>(
+  { url: 'ws://localhost:8080/ws', prediction: rules, shouldPredict: (own) => !('dead' in own.view) },
   {
-    welcome: (w) => loadMap(w.game.map),            // w.id is your entity id; w.world the config
-    added: (e) => createSprite(e.state.id),
+    welcome: (w) => loadMap(w.game.map),            // w.id is your entity id; w.world the config; w.schema the names
+    added: (e) => createSprite(e.state.id, e.state.kind),
     removed: (id) => destroySprite(id),
-    snapshot: (s) => s.events.forEach(playEvent),   // s.entities: id, x, y, group, spatial, player, view
   },
 );
+client.on('hit', (hit) => playHit(hit));            // every event named "hit", in order
 client.connect();
 
 function frame(dtMs: number) {
@@ -40,12 +42,12 @@ function frame(dtMs: number) {
   const t = client.renderTime();
   for (const [id, e] of client.entities) {
     const p = client.positionOf(id, t); // never draw e.state.x directly: it jumps once per tick
-    if (p) place(id, p.x, p.y, e.state.view);
+    if (p) place(id, p.x, p.y, e.state.kind, e.state.view); // view: visible components by name
   }
 }
 ```
 
-Send inputs when they change (not every frame): `client.sendInput({ dx, dy })`. Commands: `client.sendCommand({ k: 'attack', target })`. Events play at their tick: `ev.tick * client.tickMs` on the `renderTime()` clock.
+Send inputs when they change (not every frame): `client.sendInput({ dx, dy })`. Commands, by name: `client.sendCommand('attack', { target })` (the gateway drops names that aren't registered commands). Events carry no tick of their own; include one in your event type if you need to play it on the `renderTime()` clock (`tick * client.tickMs`).
 
 ## Prediction rules
 
@@ -53,11 +55,11 @@ Send inputs when they change (not every frame): `client.sendInput({ dx, dy })`. 
 import type { PredictionRules } from '@worldmesh/client';
 type State = { x: number; y: number; dir: { x: number; y: number } };
 
-const rules: PredictionRules<State, Move, Look> = {
+const rules: PredictionRules<State, Move, Components> = {
   idle: { dx: 0, dy: 0 },
   isIdle: (m) => m.dx === 0 && m.dy === 0,
   fromServer: (e, held) => ({ x: e.x, y: e.y, dir: { x: held.dx, y: held.dy } }),
-  simulateTick: (s, changes, untilSub) => simulateTick(map, s, changes, untilSub), // == Game::tick
+  simulateTick: (s, changes, untilSub) => simulateTick(map, s, changes, untilSub), // == the server's movement system
   position: (s) => ({ x: s.x, y: s.y }),
 };
 ```
@@ -68,7 +70,7 @@ const rules: PredictionRules<State, Move, Look> = {
 
 ```ts
 import { DebugPanel } from '@worldmesh/debug';
-const panel = new DebugPanel({ client, onOverlay: () => redraw(), traceNote: (ev) => /* {trace, start|result} */ undefined });
+const panel = new DebugPanel({ client, onOverlay: () => redraw(), traceNote: (ev) => /* ev: { name, data } -> {trace, start|result} */ undefined });
 panel.groupColor(entity.state.group); // colours matching its legends
 panel.overlays.groups;                // groups | spatial | senses | view | ghosts
 panel.addSection('My game');          // an element for your own controls
@@ -78,7 +80,7 @@ The gateway needs `--allow-debug` for scaling and fake lag. Never in production.
 
 ## Checklist
 
-- [ ] TS types mirror the Rust serde output (check with a JSON round trip test on the Rust side).
+- [ ] TS types mirror the Rust serde output under the registered names (check with `TestWorld::rules().command_from_json(name, json)` on the Rust side).
 - [ ] Draw with `positionOf`, not `state.x/y`.
 - [ ] Inputs sent on change only; prediction rules match the server bit for bit.
 - [ ] Handle `removed` (entities leave view) and reconnects (`welcome` fires again).

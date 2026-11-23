@@ -8,9 +8,10 @@ https://ominousone.github.io/Worldmesh/ (machine-readable: `/llms.txt`, `/llms-f
 
 | Path | What |
 | --- | --- |
-| `crates/worldmesh` | The library games depend on: re-exports everything below, plus `worldmesh::run` (`cli`) |
+| `crates/worldmesh` | The library games depend on: re-exports everything below and the derives, plus `worldmesh::run` (`cli`) |
 | `crates/worldmesh-core` | Shared by every process: `protocol` (every message), `bus` (NATS, MessagePack or JSON), `codec`, `config`, `subjects`, `time`, `stats`, `views` |
-| `crates/worldmesh-sim` | Server Entity Groups: the game model (`game`) and simulation (`group`) |
+| `crates/worldmesh-sim` | Server Entity Groups: the game model (`world`: World, Plugin, Rules; `component`; `entity`; `me`) and simulation (`group`). `test_game` (feature `test-game`) is the library's own test fixture, not for games |
+| `crates/worldmesh-macros` | `#[derive(Component)]` and `#[derive(Message)]` |
 | `crates/worldmesh-spatial`, `-orchestrator`, `-gateway` | One crate per role; the gateway also has `snapshot` (compact client snapshots) |
 | `crates/worldmesh-testing` | `TestWorld` |
 | `packages/client` | `@worldmesh/client` (TypeScript): connection, snapshot decoding, interpolation, prediction |
@@ -35,7 +36,8 @@ Run all of the first three before committing.
 
 ## Rules
 
-- **Game code runs only in Server Entity Groups.** Cells, the orchestrator and gateways handle the game's types as opaque MessagePack bytes (the gateway also calls `Game::welcome` and `Game::join`). Keep it that way: no game knowledge outside `worldmesh-sim`.
+- **The library is only the networking.** No game features in `crates/`: no health, movement, inventory or anything a game would define. A feature that only some games need belongs in an example plugin (or, later, an optional plugin crate), never in the core. What an entity gets from the library is its id, position, player flag and kind.
+- **Game code runs only in Server Entity Groups.** Cells, the orchestrator and gateways handle components and messages as ids and MessagePack bytes (the gateway also runs the world's `join` function, checks players' inputs and commands against their types, and names things for JSON clients). Keep it that way.
 - **Actions are delivered on the next tick, exactly once, wherever the target is.** Anything touching delivery (`worldmesh-sim` `group.rs`: `route`, `forward`, `deliver_envelopes`, `first_delivery`) needs a test in `group/tests.rs` or `testing.rs`, including mid-handoff cases.
 - **The snapshot format is shared with TypeScript.** Changing `crates/worldmesh-gateway/src/snapshot.rs` means changing `packages/client/src/snapshot.ts`, then running `WORLDMESH_WRITE_FIXTURES=1 cargo test -p worldmesh-gateway fixture` and the client's tests.
 - **Protocol types mirror TypeScript types** in `packages/client/src/protocol.ts` (Rust side: `crates/worldmesh-core/src/protocol.rs`). Change both.
