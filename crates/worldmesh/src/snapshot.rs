@@ -376,4 +376,65 @@ mod tests {
         let json = serde_json::to_vec(&world).unwrap().len();
         assert!(compact * 10 < json, "compact {compact} bytes vs JSON {json}");
     }
+
+    /// The client's decoder (`packages/client`) is checked against snapshots this encoder
+    /// wrote, kept in a fixture file. Run with `WORLDMESH_WRITE_FIXTURES=1` to rewrite it after
+    /// changing the format (then run the client's tests).
+    #[test]
+    fn the_client_fixture_matches_what_the_encoder_writes() {
+        use serde_json::json;
+        let me = 7;
+        let view = |hp: u32, name: &str| crate::codec::to_bytes(&json!({ "hp": hp, "name": name })).unwrap();
+        let entity = |id: u32, x: f32, y: f32, group: u32, hp: u32| ViewEntity {
+            id,
+            x,
+            y,
+            group,
+            spatial: 0x8001,
+            player: id < 100,
+            view: view(hp, &format!("e{id}")),
+        };
+        let event = crate::codec::to_bytes(&json!({ "k": "hit", "target": 101, "damage": 12 })).unwrap();
+        let sense = SenseDebug { id: 101, x: 3.0, y: 4.0, r: 6.0, found: 2, spatial: vec![0x8001] };
+        let mut enc = Encoder::new(SCALE);
+        let first = vec![entity(me, 10.123_4, 20.5, 1, 100), entity(101, 12.25, 20.75, 2, 100), entity(102, 30.0, 31.0, 2, 50)];
+        let a = enc.encode(me, 1000, &first, &[], &[], &[], &[]);
+        // 7 moved, 101 got hurt (view changed) and moved group, 102 is gone (5 ticks later it leaves).
+        let second = vec![entity(me, 10.623_4, 20.5, 1, 100), entity(101, 12.25, 20.75, 3, 88)];
+        let rest: Vec<Vec<u8>> =
+            (1001..=1005).map(|tick| enc.encode(me, tick, &second, &[&event], &[sense.clone()], &[], &[])).collect();
+        let q = |v: f32| f64::from(quantize(v, SCALE)) / f64::from(SCALE);
+        let shown = |e: &ViewEntity| {
+            let (x, y) = if e.id == me { (f64::from(e.x), f64::from(e.y)) } else { (q(e.x), q(e.y)) };
+            json!({ "id": e.id, "x": x, "y": y, "group": e.group, "spatial": e.spatial, "player": e.player,
+                    "view": crate::codec::bytes_to_json(&e.view) })
+        };
+        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let fixture = json!({
+            "me": me,
+            "pos_scale": SCALE,
+            // Applied in order; what the client should have is given after the first and the last.
+            "snapshots": std::iter::once(json!({ "hex": hex(&a), "tick": 1000,
+                    "entities": first.iter().map(shown).collect::<Vec<_>>(), "events": [], "senses": [] }))
+                .chain(rest.iter().enumerate().map(|(i, b)| {
+                    let tick = 1001 + i as u64;
+                    if tick < 1005 {
+                        json!({ "hex": hex(b), "tick": tick })
+                    } else {
+                        json!({ "hex": hex(b), "tick": tick, "entities": second.iter().map(shown).collect::<Vec<_>>(),
+                                "events": [crate::codec::bytes_to_json(&event)], "senses": [sense] })
+                    }
+                }))
+                .collect::<Vec<_>>(),
+        });
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/client/test/fixtures/snapshots.json");
+        let text = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
+        if std::env::var_os("WORLDMESH_WRITE_FIXTURES").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &text).unwrap();
+        }
+        let saved = std::fs::read_to_string(&path).expect("fixture missing: run with WORLDMESH_WRITE_FIXTURES=1");
+        assert_eq!(saved, text, "the snapshot format changed: rewrite the fixture and check the client");
+    }
+
 }
