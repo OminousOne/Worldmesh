@@ -38,7 +38,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use worldmesh_core::protocol::{BusMsg, EntityId, Part, SenseDebug, StreamMsg, ViewEntity, WireEvent};
+use worldmesh_core::protocol::{
+    BusMsg, EntityId, Part, SenseDebug, StreamMsg, ViewEntity, WireEvent,
+};
 
 pub const KIND_SNAPSHOT: u8 = 1;
 /// The first snapshot after a reset: the client forgets what it had.
@@ -85,7 +87,11 @@ pub struct Encoder {
 
 impl Encoder {
     pub fn new(pos_scale: f32) -> Self {
-        Self { pos_scale, known: BTreeMap::new(), started: false }
+        Self {
+            pos_scale,
+            known: BTreeMap::new(),
+            started: false,
+        }
     }
 
     /// Forget everything (the next snapshot re-sends every entity in full).
@@ -164,10 +170,18 @@ impl Encoder {
         });
 
         let mut out = Vec::with_capacity(24 + entered.len() + updated.len() + left.len());
-        out.push(if self.started { KIND_SNAPSHOT } else { KIND_FULL });
+        out.push(if self.started {
+            KIND_SNAPSHOT
+        } else {
+            KIND_FULL
+        });
         self.started = true;
         out.extend_from_slice(&tick.to_le_bytes());
-        for (n, part) in [(n_entered, &entered), (n_updated, &updated), (n_left, &left)] {
+        for (n, part) in [
+            (n_entered, &entered),
+            (n_updated, &updated),
+            (n_left, &left),
+        ] {
             out.extend_from_slice(&n.to_le_bytes());
             out.extend_from_slice(part);
         }
@@ -178,7 +192,16 @@ impl Encoder {
             out.extend_from_slice(&ev.body);
         }
         let empty = senses.is_empty() && bus.is_empty() && streams.is_empty();
-        let debug = if empty { Vec::new() } else { serde_json::to_vec(&Debug { senses, bus, streams }).unwrap_or_default() };
+        let debug = if empty {
+            Vec::new()
+        } else {
+            serde_json::to_vec(&Debug {
+                senses,
+                bus,
+                streams,
+            })
+            .unwrap_or_default()
+        };
         put_u32(&mut out, debug.len() as u32);
         out.extend_from_slice(&debug);
         out
@@ -192,7 +215,13 @@ impl Encoder {
         };
         let mut parts = e.parts.clone();
         parts.sort_by_key(|(c, _)| *c);
-        Sent { pos, group: e.group as u16, spatial: e.spatial as u16, parts, missing: 0 }
+        Sent {
+            pos,
+            group: e.group as u16,
+            spatial: e.spatial as u16,
+            parts,
+            missing: 0,
+        }
     }
 }
 
@@ -206,7 +235,11 @@ enum Pos {
 /// What changed between two sorted component lists: (new or changed, removed).
 fn diff<'a>(before: &[Part], now: &'a [Part]) -> (Vec<&'a Part>, Vec<u16>) {
     let new = now.iter().filter(|p| !before.contains(p)).collect();
-    let gone = before.iter().map(|(c, _)| *c).filter(|c| !now.iter().any(|(n, _)| n == c)).collect();
+    let gone = before
+        .iter()
+        .map(|(c, _)| *c)
+        .filter(|c| !now.iter().any(|(n, _)| n == c))
+        .collect();
     (new, gone)
 }
 
@@ -344,7 +377,15 @@ mod tests {
                 let id = u32_(&mut at);
                 let player = u8_(&mut at) & 1 != 0;
                 let kind = u16_(&mut at);
-                let mut e = Known { x: 0.0, y: 0.0, group: 0, spatial: 0, player, kind, parts: BTreeMap::new() };
+                let mut e = Known {
+                    x: 0.0,
+                    y: 0.0,
+                    group: 0,
+                    spatial: 0,
+                    player,
+                    kind,
+                    parts: BTreeMap::new(),
+                };
                 fields(&mut at, id, &mut e);
                 self.known.insert(id, e);
             }
@@ -371,7 +412,12 @@ mod tests {
             let debug = u32_(&mut at) as usize;
             at += debug;
             assert_eq!(at, buf.len(), "read exactly what was written");
-            Decoded { tick, counts: (n, u, l), events, debug }
+            Decoded {
+                tick,
+                counts: (n, u, l),
+                events,
+                debug,
+            }
         }
     }
 
@@ -382,13 +428,26 @@ mod tests {
     /// Two components: 0 is health (100), 1 is a name.
     fn entity(id: u32, x: f32, y: f32) -> ViewEntity {
         let parts = vec![part(0, &[100]), part(1, &[0xa1, b'a'])];
-        ViewEntity { id, x, y, group: 7, spatial: 0x8001, player: id == 1, kind: 3, parts }
+        ViewEntity {
+            id,
+            x,
+            y,
+            group: 7,
+            spatial: 0x8001,
+            player: id == 1,
+            kind: 3,
+            parts,
+        }
     }
 
     #[test]
     fn round_trips_and_sends_only_what_changed() {
         let (mut enc, mut dec) = (Encoder::new(SCALE), Decoder::default());
-        let mut world = vec![entity(1, 10.123_457, 20.5), entity(2, 30.0, 40.0), entity(3, 5.0, 5.0)];
+        let mut world = vec![
+            entity(1, 10.123_457, 20.5),
+            entity(2, 30.0, 40.0),
+            entity(3, 5.0, 5.0),
+        ];
         let first = enc.encode(1, 1000, &world, &[], &[], &[], &[]);
         assert_eq!(first[0], KIND_FULL);
         let d = dec.decode(1, &first);
@@ -406,7 +465,11 @@ mod tests {
         assert_eq!(d.counts, (0, 2, 0));
         assert!((dec.known[&2].x - 30.25).abs() < 1.0 / SCALE);
         assert_eq!(dec.known[&3].parts, BTreeMap::from([(0, vec![80])]));
-        assert!(second.len() < 48, "{} bytes for two small changes", second.len());
+        assert!(
+            second.len() < 48,
+            "{} bytes for two small changes",
+            second.len()
+        );
 
         // Nothing changes: nearly empty.
         let third = enc.encode(1, 1002, &world, &[], &[], &[], &[]);
@@ -419,20 +482,48 @@ mod tests {
         let big = vec![0xc4; 200];
         let mut e = entity(2, 1.0, 1.0);
         e.parts.push(part(5, &big));
-        dec.decode(1, &enc.encode(1, 1, std::slice::from_ref(&e), &[], &[], &[], &[]));
+        dec.decode(
+            1,
+            &enc.encode(1, 1, std::slice::from_ref(&e), &[], &[], &[], &[]),
+        );
         e.parts[0] = part(0, &[99]);
         let second = enc.encode(1, 2, std::slice::from_ref(&e), &[], &[], &[], &[]);
         dec.decode(1, &second);
-        assert!(second.len() < 40, "the big component isn't re-sent: {} bytes", second.len());
+        assert!(
+            second.len() < 40,
+            "the big component isn't re-sent: {} bytes",
+            second.len()
+        );
         assert_eq!(dec.known[&2].parts[&5], big);
     }
 
     #[test]
     fn events_and_debug_ride_along() {
         let (mut enc, mut dec) = (Encoder::new(SCALE), Decoder::default());
-        let ev = WireEvent { msg: 4, body: vec![0x81, 0xa1, b'e', 0xa3, b'h', b'i', b't'] };
-        let sense = SenseDebug { id: 1, x: 1.0, y: 1.0, r: 6.0, found: 2, spatial: vec![0x8001] };
-        let d = dec.decode(1, &enc.encode(1, 5, &[entity(1, 1.0, 1.0)], &[ev.clone(), ev.clone()], &[sense], &[], &[]));
+        let ev = WireEvent {
+            msg: 4,
+            body: vec![0x81, 0xa1, b'e', 0xa3, b'h', b'i', b't'],
+        };
+        let sense = SenseDebug {
+            id: 1,
+            x: 1.0,
+            y: 1.0,
+            r: 6.0,
+            found: 2,
+            spatial: vec![0x8001],
+        };
+        let d = dec.decode(
+            1,
+            &enc.encode(
+                1,
+                5,
+                &[entity(1, 1.0, 1.0)],
+                &[ev.clone(), ev.clone()],
+                &[sense],
+                &[],
+                &[],
+            ),
+        );
         assert_eq!(d.events, vec![(4, ev.body.clone()), (4, ev.body)]);
         assert!(d.debug > 0);
     }
@@ -444,7 +535,11 @@ mod tests {
         dec.decode(1, &enc.encode(1, 1, &world, &[], &[], &[], &[]));
         for t in 2..2 + u64::from(LEAVE_AFTER) - 1 {
             let d = dec.decode(1, &enc.encode(1, t, &world[..1], &[], &[], &[], &[]));
-            assert_eq!((dec.known.len(), d.counts.2), (2, 0), "a short gap (mid-handoff) isn't a leave");
+            assert_eq!(
+                (dec.known.len(), d.counts.2),
+                (2, 0),
+                "a short gap (mid-handoff) isn't a leave"
+            );
         }
         let d = dec.decode(1, &enc.encode(1, 99, &world[..1], &[], &[], &[], &[]));
         assert_eq!((dec.known.len(), d.counts.2), (1, 1));
@@ -453,14 +548,19 @@ mod tests {
     #[test]
     fn far_smaller_than_json_for_a_moving_crowd() {
         let mut enc = Encoder::new(SCALE);
-        let mut world: Vec<ViewEntity> = (0..1600).map(|i| entity(i + 2, (i % 64) as f32 + 0.5, (i / 64) as f32 + 0.5)).collect();
+        let mut world: Vec<ViewEntity> = (0..1600)
+            .map(|i| entity(i + 2, (i % 64) as f32 + 0.5, (i / 64) as f32 + 0.5))
+            .collect();
         enc.encode(1, 1, &world, &[], &[], &[], &[]);
         for e in &mut world {
             e.x += 0.5; // everyone moves
         }
         let compact = enc.encode(1, 2, &world, &[], &[], &[], &[]).len();
         let json = serde_json::to_vec(&world).unwrap().len();
-        assert!(compact * 10 < json, "compact {compact} bytes vs JSON {json}");
+        assert!(
+            compact * 10 < json,
+            "compact {compact} bytes vs JSON {json}"
+        );
     }
 
     /// The client's decoder (`packages/client`) is checked against snapshots this encoder
@@ -475,14 +575,36 @@ mod tests {
         let names = ["health", "name", "burning"];
         let me = 7;
         let entity = |id: u32, x: f32, y: f32, group: u32, hp: u32, burning: bool| {
-            let mut parts = vec![(0, ByteBuf::from(to_bytes(&hp).unwrap())), (1, ByteBuf::from(to_bytes(&format!("e{id}")).unwrap()))];
+            let mut parts = vec![
+                (0, ByteBuf::from(to_bytes(&hp).unwrap())),
+                (1, ByteBuf::from(to_bytes(&format!("e{id}")).unwrap())),
+            ];
             if burning {
                 parts.push((2, ByteBuf::from(to_bytes(&json!({ "ticks": 3 })).unwrap())));
             }
-            ViewEntity { id, x, y, group, spatial: 0x8001, player: id < 100, kind: u16::from(id >= 100), parts }
+            ViewEntity {
+                id,
+                x,
+                y,
+                group,
+                spatial: 0x8001,
+                player: id < 100,
+                kind: u16::from(id >= 100),
+                parts,
+            }
         };
-        let event = WireEvent { msg: 0, body: to_bytes(&json!({ "target": 101, "damage": 12 })).unwrap() };
-        let sense = SenseDebug { id: 101, x: 3.0, y: 4.0, r: 6.0, found: 2, spatial: vec![0x8001] };
+        let event = WireEvent {
+            msg: 0,
+            body: to_bytes(&json!({ "target": 101, "damage": 12 })).unwrap(),
+        };
+        let sense = SenseDebug {
+            id: 101,
+            x: 3.0,
+            y: 4.0,
+            r: 6.0,
+            found: 2,
+            spatial: vec![0x8001],
+        };
         let mut enc = Encoder::new(SCALE);
         let first = vec![
             entity(me, 10.123_4, 20.5, 1, 100, false),
@@ -491,15 +613,35 @@ mod tests {
         ];
         let a = enc.encode(me, 1000, &first, &[], &[], &[], &[]);
         // 7 moved; 101 got hurt, stopped burning and moved group; 102 is gone (5 ticks later it leaves).
-        let second = vec![entity(me, 10.623_4, 20.5, 1, 100, false), entity(101, 12.25, 20.75, 3, 88, false)];
+        let second = vec![
+            entity(me, 10.623_4, 20.5, 1, 100, false),
+            entity(101, 12.25, 20.75, 3, 88, false),
+        ];
         let rest: Vec<Vec<u8>> = (1001..=1005)
-            .map(|tick| enc.encode(me, tick, &second, std::slice::from_ref(&event), std::slice::from_ref(&sense), &[], &[]))
+            .map(|tick| {
+                enc.encode(
+                    me,
+                    tick,
+                    &second,
+                    std::slice::from_ref(&event),
+                    std::slice::from_ref(&sense),
+                    &[],
+                    &[],
+                )
+            })
             .collect();
         let q = |v: f32| f64::from(quantize(v, SCALE)) / f64::from(SCALE);
         let shown = |e: &ViewEntity| {
-            let (x, y) = if e.id == me { (f64::from(e.x), f64::from(e.y)) } else { (q(e.x), q(e.y)) };
-            let view: serde_json::Map<String, serde_json::Value> =
-                e.parts.iter().map(|(c, b)| (names[*c as usize].to_string(), bytes_to_json(b))).collect();
+            let (x, y) = if e.id == me {
+                (f64::from(e.x), f64::from(e.y))
+            } else {
+                (q(e.x), q(e.y))
+            };
+            let view: serde_json::Map<String, serde_json::Value> = e
+                .parts
+                .iter()
+                .map(|(c, b)| (names[*c as usize].to_string(), bytes_to_json(b)))
+                .collect();
             let kind = ["hero", "bot"][e.kind as usize];
             json!({ "id": e.id, "x": x, "y": y, "group": e.group, "spatial": e.spatial, "player": e.player,
                     "kind": kind, "view": view })
@@ -523,13 +665,18 @@ mod tests {
                 }))
                 .collect::<Vec<_>>(),
         });
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/client/test/fixtures/snapshots.json");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/client/test/fixtures/snapshots.json");
         let text = serde_json::to_string_pretty(&fixture).unwrap() + "\n";
         if std::env::var_os("WORLDMESH_WRITE_FIXTURES").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, &text).unwrap();
         }
-        let saved = std::fs::read_to_string(&path).expect("fixture missing: run with WORLDMESH_WRITE_FIXTURES=1");
-        assert_eq!(saved, text, "the snapshot format changed: rewrite the fixture and check the client");
+        let saved = std::fs::read_to_string(&path)
+            .expect("fixture missing: run with WORLDMESH_WRITE_FIXTURES=1");
+        assert_eq!(
+            saved, text,
+            "the snapshot format changed: rewrite the fixture and check the client"
+        );
     }
 }

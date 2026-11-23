@@ -24,10 +24,13 @@ use tracing::{info, warn};
 
 use worldmesh_core::config::{partition, WorldConfig};
 use worldmesh_core::protocol::{
-    Assignment, DebugCommand, EntityId, GroupCommand, GroupCommandKind, GroupId, Heartbeat, HostCommand, JoinRequest,
-    NewEntity, SpawnRequest, SPAWNED_ID_START,
+    Assignment, DebugCommand, EntityId, GroupCommand, GroupCommandKind, GroupId, Heartbeat,
+    HostCommand, JoinRequest, NewEntity, SpawnRequest, SPAWNED_ID_START,
 };
-use worldmesh_core::subjects::{random_process_id, ASSIGNMENTS, DEBUG_COMMANDS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, JOINS, SPAWNS};
+use worldmesh_core::subjects::{
+    random_process_id, ASSIGNMENTS, DEBUG_COMMANDS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS,
+    JOINS, SPAWNS,
+};
 use worldmesh_core::{bus, stats, time};
 
 /// A process that hasn't sent a heartbeat for this long is considered dead.
@@ -55,14 +58,28 @@ pub fn plan(
     if groups.is_empty() {
         return BTreeMap::new();
     }
-    let mut sorted: Vec<(u64, EntityId)> = entities.iter().map(|&(id, x, y)| (config.tile_hilbert_index(x, y), id)).collect();
+    let mut sorted: Vec<(u64, EntityId)> = entities
+        .iter()
+        .map(|&(id, x, y)| (config.tile_hilbert_index(x, y), id))
+        .collect();
     sorted.sort_unstable();
     let (k, n) = (groups.len(), sorted.len());
-    let runs: Vec<&[(u64, EntityId)]> = (0..k).map(|r| &sorted[r * n / k..(r + 1) * n / k]).collect();
+    let runs: Vec<&[(u64, EntityId)]> = (0..k)
+        .map(|r| &sorted[r * n / k..(r + 1) * n / k])
+        .collect();
     // overlap[r][g]: how many of run r group g already has.
     let overlap: Vec<Vec<usize>> = runs
         .iter()
-        .map(|run| groups.iter().map(|g| run.iter().filter(|(_, id)| current.get(id) == Some(g)).count()).collect())
+        .map(|run| {
+            groups
+                .iter()
+                .map(|g| {
+                    run.iter()
+                        .filter(|(_, id)| current.get(id) == Some(g))
+                        .count()
+                })
+                .collect()
+        })
         .collect();
     let order = best_matching(&overlap);
     let mut out = BTreeMap::new();
@@ -92,7 +109,10 @@ fn best_matching(score: &[Vec<usize>]) -> Vec<usize> {
     let mut taken = vec![false; k];
     (0..k)
         .map(|r| {
-            let g = (0..k).filter(|&g| !taken[g]).max_by_key(|&g| (score[r][g], std::cmp::Reverse(g))).expect("one left");
+            let g = (0..k)
+                .filter(|&g| !taken[g])
+                .max_by_key(|&g| (score[r][g], std::cmp::Reverse(g)))
+                .expect("one left");
             taken[g] = true;
             g
         })
@@ -112,7 +132,11 @@ fn permute(p: &mut Vec<usize>, i: usize, visit: &mut impl FnMut(&[usize])) {
 
 /// Up to `n` of `live`: those in `current` first, in their order, then the rest by id.
 fn stable_pick(current: &[u32], live: &[u32], n: u32) -> Vec<u32> {
-    let mut out: Vec<u32> = current.iter().copied().filter(|id| live.contains(id)).collect();
+    let mut out: Vec<u32> = current
+        .iter()
+        .copied()
+        .filter(|id| live.contains(id))
+        .collect();
     out.extend(live.iter().copied().filter(|id| !current.contains(id)));
     out.truncate(n as usize);
     out
@@ -158,20 +182,39 @@ impl Orchestrator {
     /// Groups in use: the ones already in use keep their place (so "Group 2" stays Group 2),
     /// extra ones are added in id order, and scaling down drops the last ones.
     fn active_groups(&self) -> Vec<u32> {
-        let current = self.current.as_ref().map(|c| c.groups.as_slice()).unwrap_or(&[]);
-        stable_pick(current, &self.groups.keys().copied().collect::<Vec<_>>(), self.desired_groups)
+        let current = self
+            .current
+            .as_ref()
+            .map(|c| c.groups.as_slice())
+            .unwrap_or(&[]);
+        stable_pick(
+            current,
+            &self.groups.keys().copied().collect::<Vec<_>>(),
+            self.desired_groups,
+        )
     }
 
     fn active_spatial(&self) -> Vec<u32> {
-        let current = self.current.as_ref().map(|c| c.spatial.as_slice()).unwrap_or(&[]);
-        stable_pick(current, &self.spatial.keys().copied().collect::<Vec<_>>(), self.desired_spatial)
+        let current = self
+            .current
+            .as_ref()
+            .map(|c| c.spatial.as_slice())
+            .unwrap_or(&[]);
+        stable_pick(
+            current,
+            &self.spatial.keys().copied().collect::<Vec<_>>(),
+            self.desired_spatial,
+        )
     }
 
     fn heartbeat(&mut self, hb: Heartbeat) {
         let now = Instant::now();
         if hb.role == "host" {
             if self.hosts.insert(hb.id, (now, hb.groups)).is_none() {
-                info!(process = format!("{:04x}", hb.id), "group process registered");
+                info!(
+                    process = format!("{:04x}", hb.id),
+                    "group process registered"
+                );
             }
             return;
         }
@@ -180,12 +223,18 @@ impl Orchestrator {
         }
         if hb.role == "spatial" {
             if self.spatial.insert(hb.id, now).is_none() {
-                info!(spatial = format!("{:04x}", hb.id), "Spatial Layer Cell registered");
+                info!(
+                    spatial = format!("{:04x}", hb.id),
+                    "Spatial Layer Cell registered"
+                );
             }
             return;
         }
         if !self.groups.contains_key(&hb.id) {
-            info!(group = format!("{:04x}", hb.id), "Server Entity Group registered");
+            info!(
+                group = format!("{:04x}", hb.id),
+                "Server Entity Group registered"
+            );
         }
         self.starting.remove(&hb.id);
         self.members.retain(|_, (g, ..)| *g != hb.id);
@@ -196,7 +245,12 @@ impl Orchestrator {
     }
 
     async fn send(&self, to: Option<u32>, kind: GroupCommandKind) {
-        bus::publish(&self.nats, GROUP_COMMANDS.to_string(), &GroupCommand { to, kind }).await;
+        bus::publish(
+            &self.nats,
+            GROUP_COMMANDS.to_string(),
+            &GroupCommand { to, kind },
+        )
+        .await;
     }
 
     /// Place new entities in the groups in use (counts stay even, neighbours together); nobody
@@ -206,9 +260,14 @@ impl Orchestrator {
         if groups.is_empty() || new.is_empty() {
             return;
         }
-        let mut all: Vec<(u32, f32, f32)> = self.members.iter().map(|(&id, &(_, x, y))| (id, x, y)).collect();
+        let mut all: Vec<(u32, f32, f32)> = self
+            .members
+            .iter()
+            .map(|(&id, &(_, x, y))| (id, x, y))
+            .collect();
         all.extend(new.iter().map(|n| (n.id, n.x, n.y)));
-        let current: BTreeMap<u32, u32> = self.members.iter().map(|(&id, &(g, ..))| (id, g)).collect();
+        let current: BTreeMap<u32, u32> =
+            self.members.iter().map(|(&id, &(g, ..))| (id, g)).collect();
         let planned = plan(&self.config, &all, &groups, &current);
         let mut by_group: BTreeMap<u32, Vec<NewEntity>> = BTreeMap::new();
         for n in new {
@@ -217,8 +276,13 @@ impl Orchestrator {
             by_group.entry(g).or_default().push(n);
         }
         for (g, entities) in by_group {
-            info!(group = format!("{g:04x}"), count = entities.len(), "placing entities");
-            self.send(Some(g), GroupCommandKind::Spawn { entities }).await;
+            info!(
+                group = format!("{g:04x}"),
+                count = entities.len(),
+                "placing entities"
+            );
+            self.send(Some(g), GroupCommandKind::Spawn { entities })
+                .await;
         }
     }
 
@@ -230,7 +294,14 @@ impl Orchestrator {
             .into_iter()
             // The gateway re-sends a join if a player vanished; don't duplicate one that exists.
             .filter(|j| !self.members.contains_key(&j.id))
-            .map(|j| NewEntity { id: j.id, x: j.x, y: j.y, player: true, kind: j.kind, parts: j.parts })
+            .map(|j| NewEntity {
+                id: j.id,
+                x: j.x,
+                y: j.y,
+                player: true,
+                kind: j.kind,
+                parts: j.parts,
+            })
             .collect();
         self.place(joins).await;
     }
@@ -241,7 +312,11 @@ impl Orchestrator {
         for e in &mut entities {
             loop {
                 let id = self.next_spawn_id;
-                self.next_spawn_id = if id == u32::MAX { SPAWNED_ID_START } else { id + 1 };
+                self.next_spawn_id = if id == u32::MAX {
+                    SPAWNED_ID_START
+                } else {
+                    id + 1
+                };
                 if !self.members.contains_key(&id) {
                     e.id = id;
                     break;
@@ -260,51 +335,74 @@ impl Orchestrator {
             return;
         }
         let now = Instant::now();
-        let all: Vec<(u32, f32, f32)> = self.members.iter().map(|(&id, &(_, x, y))| (id, x, y)).collect();
-        let current: BTreeMap<u32, u32> = self.members.iter().map(|(&id, &(g, ..))| (id, g)).collect();
+        let all: Vec<(u32, f32, f32)> = self
+            .members
+            .iter()
+            .map(|(&id, &(_, x, y))| (id, x, y))
+            .collect();
+        let current: BTreeMap<u32, u32> =
+            self.members.iter().map(|(&id, &(g, ..))| (id, g)).collect();
         let planned = plan(&self.config, &all, &groups, &current);
         let mut by_group: BTreeMap<u32, Vec<(u32, u32)>> = BTreeMap::new();
         for (&id, &to) in &planned {
             let from = current[&id];
             let stranded = !groups.contains(&from);
-            let recently = self.moves_sent.get(&id).is_some_and(|&at| now.duration_since(at) < RESEND_MOVE_AFTER);
+            let recently = self
+                .moves_sent
+                .get(&id)
+                .is_some_and(|&at| now.duration_since(at) < RESEND_MOVE_AFTER);
             if from != to && (everyone || stranded) && !recently {
                 by_group.entry(from).or_default().push((id, to));
             }
         }
         for (from, moves) in by_group {
-            info!(group = format!("{from:04x}"), count = moves.len(), "handing entities off");
+            info!(
+                group = format!("{from:04x}"),
+                count = moves.len(),
+                "handing entities off"
+            );
             for &(id, to) in &moves {
                 self.moves_sent.insert(id, now);
                 if let Some(m) = self.members.get_mut(&id) {
                     m.0 = to;
                 }
             }
-            self.send(Some(from), GroupCommandKind::Release { moves }).await;
+            self.send(Some(from), GroupCommandKind::Release { moves })
+                .await;
         }
-        self.moves_sent.retain(|_, at| now.duration_since(*at) < RESEND_MOVE_AFTER * 2);
+        self.moves_sent
+            .retain(|_, at| now.duration_since(*at) < RESEND_MOVE_AFTER * 2);
     }
 
     /// Ask group processes for more groups until the count asked for is running (or starting),
     /// each new one on the process running the fewest.
     async fn ensure_groups(&mut self) {
         let now = Instant::now();
-        self.starting.retain(|_, (_, at)| now.duration_since(*at) < START_TIMEOUT);
+        self.starting
+            .retain(|_, (_, at)| now.duration_since(*at) < START_TIMEOUT);
         let have = self.groups.len() + self.starting.len();
         let want = self.desired_groups as usize;
         if have >= want || self.hosts.is_empty() {
             return;
         }
-        let mut load: BTreeMap<u32, usize> = self.hosts.iter().map(|(&h, (_, g))| (h, g.len())).collect();
+        let mut load: BTreeMap<u32, usize> =
+            self.hosts.iter().map(|(&h, (_, g))| (h, g.len())).collect();
         for (h, _) in self.starting.values() {
             *load.entry(*h).or_default() += 1;
         }
         let mut by_host: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for _ in have..want {
-            let host = load.iter().min_by_key(|(&h, &n)| (n, h)).map(|(&h, _)| h).expect("hosts checked above");
+            let host = load
+                .iter()
+                .min_by_key(|(&h, &n)| (n, h))
+                .map(|(&h, _)| h)
+                .expect("hosts checked above");
             let id = loop {
                 let id = random_process_id(false);
-                if !self.groups.contains_key(&id) && !self.starting.contains_key(&id) && !self.stopped.contains_key(&id) {
+                if !self.groups.contains_key(&id)
+                    && !self.starting.contains_key(&id)
+                    && !self.stopped.contains_key(&id)
+                {
                     break id;
                 }
             };
@@ -313,8 +411,21 @@ impl Orchestrator {
             by_host.entry(host).or_default().push(id);
         }
         for (host, start) in by_host {
-            info!(process = format!("{host:04x}"), count = start.len(), "starting groups");
-            bus::publish(&self.nats, HOST_COMMANDS.to_string(), &HostCommand { host, start, stop: Vec::new() }).await;
+            info!(
+                process = format!("{host:04x}"),
+                count = start.len(),
+                "starting groups"
+            );
+            bus::publish(
+                &self.nats,
+                HOST_COMMANDS.to_string(),
+                &HostCommand {
+                    host,
+                    start,
+                    stop: Vec::new(),
+                },
+            )
+            .await;
         }
     }
 
@@ -332,7 +443,11 @@ impl Orchestrator {
             if now.duration_since(since) < IDLE_BEFORE_STOP {
                 continue;
             }
-            if let Some((&host, _)) = self.hosts.iter().find(|(_, (_, groups))| groups.contains(&g)) {
+            if let Some((&host, _)) = self
+                .hosts
+                .iter()
+                .find(|(_, (_, groups))| groups.contains(&g))
+            {
                 stops.entry(host).or_default().push(g);
             }
         }
@@ -342,15 +457,33 @@ impl Orchestrator {
                 self.idle_since.remove(id);
                 self.stopped.insert(*id, now);
             }
-            info!(process = format!("{host:04x}"), count = stop.len(), "stopping empty groups");
-            bus::publish(&self.nats, HOST_COMMANDS.to_string(), &HostCommand { host, start: Vec::new(), stop }).await;
+            info!(
+                process = format!("{host:04x}"),
+                count = stop.len(),
+                "stopping empty groups"
+            );
+            bus::publish(
+                &self.nats,
+                HOST_COMMANDS.to_string(),
+                &HostCommand {
+                    host,
+                    start: Vec::new(),
+                    stop,
+                },
+            )
+            .await;
         }
-        self.stopped.retain(|_, at| now.duration_since(*at) < Duration::from_secs(10));
+        self.stopped
+            .retain(|_, at| now.duration_since(*at) < Duration::from_secs(10));
     }
 
     fn assignment(&self, groups: Vec<u32>, spatial: Vec<u32>) -> Assignment {
         let count = self.config.chunk_count();
-        let owners = if spatial.is_empty() { vec![0; count] } else { partition(&self.order, &vec![1.0; count], &spatial) };
+        let owners = if spatial.is_empty() {
+            vec![0; count]
+        } else {
+            partition(&self.order, &vec![1.0; count], &spatial)
+        };
         Assignment {
             version: self.version,
             chunk_size: self.config.chunk_size,
@@ -369,12 +502,21 @@ impl Orchestrator {
 
     /// Lag for the groups still running, for the assignment.
     fn group_lag(&self) -> Vec<(u32, u32)> {
-        self.lag.iter().filter(|(g, _)| self.groups.contains_key(g)).map(|(&g, &ms)| (g, ms)).collect()
+        self.lag
+            .iter()
+            .filter(|(g, _)| self.groups.contains_key(g))
+            .map(|(&g, &ms)| (g, ms))
+            .collect()
     }
 }
 
 /// The orchestrator process: starts with `groups` groups and `spatial` Spatial Layer Cells in use.
-pub async fn run(nats: async_nats::Client, config: WorldConfig, groups: u32, spatial: u32) -> Result<()> {
+pub async fn run(
+    nats: async_nats::Client,
+    config: WorldConfig,
+    groups: u32,
+    spatial: u32,
+) -> Result<()> {
     stats::spawn_reporter(nats.clone(), "orchestrator", 0);
     let mut heartbeats = bus::subscribe::<Heartbeat>(&nats, HEARTBEATS).await?;
     let mut debug = bus::subscribe::<DebugCommand>(&nats, DEBUG_COMMANDS).await?;
@@ -406,7 +548,11 @@ pub async fn run(nats: async_nats::Client, config: WorldConfig, groups: u32, spa
     let mut last_publish = Instant::now();
     let started = Instant::now();
     let mut interval = tokio::time::interval(Duration::from_millis(250));
-    info!(groups = o.desired_groups, spatial = o.desired_spatial, "orchestrator running");
+    info!(
+        groups = o.desired_groups,
+        spatial = o.desired_spatial,
+        "orchestrator running"
+    );
 
     loop {
         let mut regroup = false;
@@ -449,17 +595,24 @@ pub async fn run(nats: async_nats::Client, config: WorldConfig, groups: u32, spa
         o.groups.retain(|id, g| {
             let alive = now.duration_since(g.seen) < PROCESS_TIMEOUT;
             if !alive {
-                warn!(group = format!("{id:04x}"), "Server Entity Group stopped responding");
+                warn!(
+                    group = format!("{id:04x}"),
+                    "Server Entity Group stopped responding"
+                );
             }
             alive
         });
         let live_groups: Vec<u32> = o.groups.keys().copied().collect();
         o.members.retain(|_, (g, ..)| live_groups.contains(g)); // a dead group's entities are gone
-        o.hosts.retain(|_, (seen, _)| now.duration_since(*seen) < PROCESS_TIMEOUT);
+        o.hosts
+            .retain(|_, (seen, _)| now.duration_since(*seen) < PROCESS_TIMEOUT);
         o.spatial.retain(|id, seen| {
             let alive = now.duration_since(*seen) < PROCESS_TIMEOUT;
             if !alive {
-                warn!(spatial = format!("{id:04x}"), "Spatial Layer Cell stopped responding");
+                warn!(
+                    spatial = format!("{id:04x}"),
+                    "Spatial Layer Cell stopped responding"
+                );
             }
             alive
         });
@@ -475,7 +628,16 @@ pub async fn run(nats: async_nats::Client, config: WorldConfig, groups: u32, spa
             o.active_groups()
         } else {
             let live = &o.groups;
-            o.current.as_ref().map(|c| c.groups.iter().copied().filter(|g| live.contains_key(g)).collect()).unwrap_or_default()
+            o.current
+                .as_ref()
+                .map(|c| {
+                    c.groups
+                        .iter()
+                        .copied()
+                        .filter(|g| live.contains_key(g))
+                        .collect()
+                })
+                .unwrap_or_default()
         };
         let spatial = o.active_spatial();
         let changed = match &o.current {
@@ -493,14 +655,18 @@ pub async fn run(nats: async_nats::Client, config: WorldConfig, groups: u32, spa
         if changed || running_changed {
             if changed {
                 o.version += 1;
-                let names = |ids: &[u32]| ids.iter().map(|id| format!("{id:04x}")).collect::<Vec<_>>();
+                let names =
+                    |ids: &[u32]| ids.iter().map(|id| format!("{id:04x}")).collect::<Vec<_>>();
                 info!(version = o.version, groups = ?names(&groups), spatial = ?names(&spatial), "new assignment");
             }
             o.current = Some(o.assignment(groups.clone(), spatial));
         }
         if let Some(cur) = &o.current {
             // Republish every second too, so processes that start later catch up.
-            if changed || running_changed || now.duration_since(last_publish) >= Duration::from_secs(1) {
+            if changed
+                || running_changed
+                || now.duration_since(last_publish) >= Duration::from_secs(1)
+            {
                 bus::publish(&nats, ASSIGNMENTS.to_string(), cur).await;
                 last_publish = now;
             }
@@ -523,16 +689,31 @@ mod tests {
         WorldConfig::default()
     }
 
-    fn plan(entities: &[(u32, f32, f32)], groups: &[u32], current: &BTreeMap<u32, u32>) -> BTreeMap<u32, u32> {
+    fn plan(
+        entities: &[(u32, f32, f32)],
+        groups: &[u32],
+        current: &BTreeMap<u32, u32>,
+    ) -> BTreeMap<u32, u32> {
         super::plan(&config(), entities, groups, current)
     }
 
     fn scatter(n: u32) -> Vec<(u32, f32, f32)> {
-        (0..n).map(|i| (i, (splitmix64(u64::from(i)) % 64) as f32 + 0.5, (splitmix64(u64::from(i) + 999) % 64) as f32 + 0.5)).collect()
+        (0..n)
+            .map(|i| {
+                (
+                    i,
+                    (splitmix64(u64::from(i)) % 64) as f32 + 0.5,
+                    (splitmix64(u64::from(i) + 999) % 64) as f32 + 0.5,
+                )
+            })
+            .collect()
     }
 
     fn counts(p: &BTreeMap<u32, u32>, groups: &[u32]) -> Vec<usize> {
-        groups.iter().map(|g| p.values().filter(|v| *v == g).count()).collect()
+        groups
+            .iter()
+            .map(|g| p.values().filter(|v| *v == g).count())
+            .collect()
     }
 
     #[test]
@@ -558,7 +739,10 @@ mod tests {
             }
             total / entities.len() as f32
         };
-        assert!(near(true) < 1.6 * near(false), "same-group neighbours are about as close as any neighbour");
+        assert!(
+            near(true) < 1.6 * near(false),
+            "same-group neighbours are about as close as any neighbour"
+        );
     }
 
     #[test]
@@ -593,9 +777,21 @@ mod tests {
     #[test]
     fn groups_in_use_keep_their_place() {
         assert_eq!(stable_pick(&[], &[5, 2, 9], 2), vec![5, 2]);
-        assert_eq!(stable_pick(&[9, 5], &[2, 5, 9], 3), vec![9, 5, 2], "a new one goes last");
-        assert_eq!(stable_pick(&[9, 5, 2], &[2, 5, 9], 2), vec![9, 5], "scaling down drops the last");
-        assert_eq!(stable_pick(&[9, 5], &[2, 9], 2), vec![9, 2], "a dead one is replaced");
+        assert_eq!(
+            stable_pick(&[9, 5], &[2, 5, 9], 3),
+            vec![9, 5, 2],
+            "a new one goes last"
+        );
+        assert_eq!(
+            stable_pick(&[9, 5, 2], &[2, 5, 9], 2),
+            vec![9, 5],
+            "scaling down drops the last"
+        );
+        assert_eq!(
+            stable_pick(&[9, 5], &[2, 9], 2),
+            vec![9, 2],
+            "a dead one is replaced"
+        );
     }
 
     #[test]

@@ -23,19 +23,19 @@ use anyhow::Result;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::info;
 
-use worldmesh_core::config::WorldConfig;
 use crate::entity::{Entity, Meta, Record};
 use crate::me::{Incoming, Me, Requests};
 use crate::world::Rules;
+use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
-    Address, Assignment, BusKind, BusMsg, DebugReport, EntityId, Envelope, EventAt, Facts, GroupCommand, GroupCommandKind,
-    GroupId, GroupReport, Heartbeat, HostCommand, Kind, NewEntity, ProcessStats, Reported, Seen, SenseAnswers, SenseQuery,
-    SpawnRequest, StreamKind, StreamMsg,
+    Address, Assignment, BusKind, BusMsg, DebugReport, EntityId, Envelope, EventAt, Facts,
+    GroupCommand, GroupCommandKind, GroupId, GroupReport, Heartbeat, HostCommand, Kind, NewEntity,
+    ProcessStats, Reported, Seen, SenseAnswers, SenseQuery, SpawnRequest, StreamKind, StreamMsg,
 };
 use worldmesh_core::subjects::{
-    entity_subject, group_inbox_subject, group_senses_subject, random_process_id, spatial_inbox_subject,
-    spatial_reports_subject, ASSIGNMENTS, BROADCAST, DEBUG_REPORTS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, SPAWNS,
-    STATS,
+    entity_subject, group_inbox_subject, group_senses_subject, random_process_id,
+    spatial_inbox_subject, spatial_reports_subject, ASSIGNMENTS, BROADCAST, DEBUG_REPORTS,
+    GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, SPAWNS, STATS,
 };
 use worldmesh_core::{bus, stats, time};
 
@@ -144,19 +144,33 @@ impl GroupWorld {
 
     /// The Spatial Layer Cell whose area (x, y) is in.
     fn spatial_at(&self, x: f32, y: f32) -> Option<GroupId> {
-        self.owners.as_ref().and_then(|o| o.get(self.config.chunk_at(x, y)).copied()).filter(|&s| s != 0)
+        self.owners
+            .as_ref()
+            .and_then(|o| o.get(self.config.chunk_at(x, y)).copied())
+            .filter(|&s| s != 0)
     }
 
     /// Every Spatial Layer Cell whose area the circle touches.
     fn spatial_in_circle(&self, x: f32, y: f32, r: f32) -> BTreeSet<GroupId> {
-        let Some(owners) = &self.owners else { return BTreeSet::new() };
-        self.config.chunks_in_circle(x, y, r).into_iter().filter_map(|i| owners.get(i).copied()).filter(|&s| s != 0).collect()
+        let Some(owners) = &self.owners else {
+            return BTreeSet::new();
+        };
+        self.config
+            .chunks_in_circle(x, y, r)
+            .into_iter()
+            .filter_map(|i| owners.get(i).copied())
+            .filter(|&s| s != 0)
+            .collect()
     }
 
     /// Entity subjects this group must listen to: what it simulates, plus what it handed off
     /// recently (to forward strays).
     pub fn listening_entities(&self) -> BTreeSet<EntityId> {
-        self.entities.keys().chain(self.moved.keys()).copied().collect()
+        self.entities
+            .keys()
+            .chain(self.moved.keys())
+            .copied()
+            .collect()
     }
 
     pub fn entity_count(&self) -> usize {
@@ -184,14 +198,27 @@ impl GroupWorld {
                     if self.left.contains(&n.id) || self.entities.contains_key(&n.id) {
                         continue;
                     }
-                    let Some(entity) = self.rules.new_entity(n.id, n.x, n.y, n.player, n.kind, &n.parts) else {
-                        tracing::warn!(id = n.id, kind = n.kind, "couldn't create an entity (unknown kind or component)");
+                    let Some(entity) = self
+                        .rules
+                        .new_entity(n.id, n.x, n.y, n.player, n.kind, &n.parts)
+                    else {
+                        tracing::warn!(
+                            id = n.id,
+                            kind = n.kind,
+                            "couldn't create an entity (unknown kind or component)"
+                        );
                         continue;
                     };
                     if n.player {
                         info!(id = n.id, x = n.x, y = n.y, "player joined");
                     }
-                    self.entities.insert(n.id, Record { entity, meta: Meta::default() });
+                    self.entities.insert(
+                        n.id,
+                        Record {
+                            entity,
+                            meta: Meta::default(),
+                        },
+                    );
                 }
             }
             GroupCommandKind::Release { moves } => {
@@ -225,10 +252,19 @@ impl GroupWorld {
             (Kind::Action { .. }, Address::Everyone) => BusKind::Broadcast,
             (Kind::Action { .. }, _) => BusKind::Action,
         };
-        self.bus_log.push(BusMsg { from: env.via, to: self.group_id, kind, trace: env.trace });
+        self.bus_log.push(BusMsg {
+            from: env.via,
+            to: self.group_id,
+            kind,
+            trace: env.trace,
+        });
         match env.kind {
             // Inputs are scheduled right away: they say exactly which tick they belong to.
-            Kind::Input { at_tick, sub, ref input } => {
+            Kind::Input {
+                at_tick,
+                sub,
+                ref input,
+            } => {
                 if let Address::Entity { id } = env.to {
                     if self.entities.contains_key(&id) {
                         let input = input.clone();
@@ -249,7 +285,10 @@ impl GroupWorld {
     /// Takes effect at that sub-step of `at_tick`, or at the start of the next tick if that
     /// tick has already been simulated. Of two inputs for the same moment, the later-sent wins.
     fn schedule_input(&mut self, id: EntityId, at_tick: u64, sub: u8, seq: u64, input: Vec<u8>) {
-        let key = (at_tick, sub.min(self.config.input_substeps.saturating_sub(1)));
+        let key = (
+            at_tick,
+            sub.min(self.config.input_substeps.saturating_sub(1)),
+        );
         let entry = self.schedule.entry(id).or_default();
         if entry.get(&key).is_none_or(|(s, _)| seq >= *s) {
             entry.insert(key, (seq, input));
@@ -257,7 +296,9 @@ impl GroupWorld {
     }
 
     fn receive_handoff(&mut self, bytes: &[u8]) {
-        let Some(mut record) = Record::decode(&self.rules, bytes) else { return };
+        let Some(mut record) = Record::decode(&self.rules, bytes) else {
+            return;
+        };
         let id = record.entity.id;
         if self.left.contains(&id) {
             return;
@@ -284,7 +325,9 @@ impl GroupWorld {
                 // Cells answer about disjoint areas, so duplicates are rare (an entity mid-way
                 // between owners); skip them without comparing every pair.
                 let known: BTreeSet<EntityId> = entry.1.iter().map(|o| o.id).collect();
-                entry.1.extend(seen.into_iter().filter(|s| !known.contains(&s.id)));
+                entry
+                    .1
+                    .extend(seen.into_iter().filter(|s| !known.contains(&s.id)));
             }
         }
     }
@@ -296,7 +339,10 @@ impl GroupWorld {
         for (&id, inputs) in self.schedule.iter_mut() {
             let later = inputs.split_off(&(tick + 1, 0));
             let now = std::mem::replace(inputs, later);
-            let list: Due = now.into_iter().map(|((at, sub), (_, bytes))| (if at < tick { 0 } else { sub }, bytes)).collect();
+            let list: Due = now
+                .into_iter()
+                .map(|((at, sub), (_, bytes))| (if at < tick { 0 } else { sub }, bytes))
+                .collect();
             if !list.is_empty() {
                 due.insert(id, list);
             }
@@ -316,8 +362,17 @@ impl GroupWorld {
 
     /// Run `f` on entity `id` with a [`Me`] for it, then carry out what game code asked for.
     /// False if the entity isn't here (or was despawned).
-    fn with_me(&mut self, id: EntityId, tick: u64, trace: u64, inputs: &[(u8, Vec<u8>)], f: impl FnOnce(&mut Me<'_>)) -> bool {
-        let Some(mut record) = self.entities.remove(&id) else { return false };
+    fn with_me(
+        &mut self,
+        id: EntityId,
+        tick: u64,
+        trace: u64,
+        inputs: &[(u8, Vec<u8>)],
+        f: impl FnOnce(&mut Me<'_>),
+    ) -> bool {
+        let Some(mut record) = self.entities.remove(&id) else {
+            return false;
+        };
         let rules = self.rules.clone();
         let mut requests = Requests::default();
         let mut despawned = false;
@@ -370,13 +425,20 @@ impl GroupWorld {
     /// simulated again.
     fn tick_entities(&mut self, tick: u64) {
         let mut due = self.take_due_inputs(tick);
-        let ids: Vec<EntityId> = self.entities.iter().filter(|(_, r)| r.meta.last_tick < tick).map(|(&id, _)| id).collect();
+        let ids: Vec<EntityId> = self
+            .entities
+            .iter()
+            .filter(|(_, r)| r.meta.last_tick < tick)
+            .map(|(&id, _)| id)
+            .collect();
         let rules = self.rules.clone();
         for stage in &rules.systems {
             for &id in &ids {
                 let inputs = due.get(&id).map(Vec::as_slice).unwrap_or(&[]);
                 for (only, system) in stage {
-                    let Some(record) = self.entities.get(&id) else { break }; // despawned meanwhile
+                    let Some(record) = self.entities.get(&id) else {
+                        break;
+                    }; // despawned meanwhile
                     if only.is_some_and(|t| !record.entity.has_type(t)) {
                         continue;
                     }
@@ -386,7 +448,9 @@ impl GroupWorld {
         }
         for id in ids {
             due.remove(&id);
-            let Some(record) = self.entities.get_mut(&id) else { continue };
+            let Some(record) = self.entities.get_mut(&id) else {
+                continue;
+            };
             record.meta.last_tick = tick;
             let (x, y) = (record.entity.x, record.entity.y);
             record.meta.trail.push((tick, x, y));
@@ -415,7 +479,8 @@ impl GroupWorld {
             Address::Area { x, y, r } => {
                 for spatial in self.spatial_in_circle(x, y, r) {
                     self.counters.actions_sent += 1;
-                    self.outbox.push((spatial_inbox_subject(spatial), env.clone()));
+                    self.outbox
+                        .push((spatial_inbox_subject(spatial), env.clone()));
                 }
             }
             Address::Everyone => {
@@ -428,7 +493,9 @@ impl GroupWorld {
 
     /// An envelope for an entity that isn't here: pass it to the new group if it just left.
     fn forward(&mut self, id: EntityId, mut env: Envelope) {
-        let Some(&(owner, _)) = self.moved.get(&id) else { return }; // gone for good
+        let Some(&(owner, _)) = self.moved.get(&id) else {
+            return;
+        }; // gone for good
         if env.hops >= MAX_HOPS {
             return;
         }
@@ -444,7 +511,8 @@ impl GroupWorld {
     fn deliver_envelopes(&mut self, tick: u64) {
         let mut envs = std::mem::take(&mut self.inbox);
         envs.append(&mut self.local_next);
-        let (mut envs, later): (Vec<_>, Vec<_>) = envs.into_iter().partition(|e| e.from.tick < tick);
+        let (mut envs, later): (Vec<_>, Vec<_>) =
+            envs.into_iter().partition(|e| e.from.tick < tick);
         self.inbox = later;
         envs.sort_by_key(|e| (e.from.tick, e.from.id, e.seq));
         for env in envs {
@@ -466,8 +534,12 @@ impl GroupWorld {
                         continue;
                     }
                     let rules = self.rules.clone();
-                    let Some(info) = rules.message(*msg) else { continue };
-                    let Some(command) = (info.decode)(body) else { continue };
+                    let Some(info) = rules.message(*msg) else {
+                        continue;
+                    };
+                    let Some(command) = (info.decode)(body) else {
+                        continue;
+                    };
                     self.with_me(id, tick, env.trace, &[], |me| {
                         for handler in &info.commands {
                             if me.despawned() {
@@ -493,7 +565,10 @@ impl GroupWorld {
                     let inside: Vec<EntityId> = self
                         .entities
                         .values()
-                        .filter(|rec| rec.entity.id != env.from.id && distance(x, y, rec.entity.x, rec.entity.y) <= r)
+                        .filter(|rec| {
+                            rec.entity.id != env.from.id
+                                && distance(x, y, rec.entity.x, rec.entity.y) <= r
+                        })
                         .map(|rec| rec.entity.id)
                         .collect();
                     let from = incoming(Some((x, y, r)), false);
@@ -509,7 +584,9 @@ impl GroupWorld {
                     let ids: Vec<EntityId> = self.entities.keys().copied().collect();
                     let from = incoming(None, true);
                     for id in ids {
-                        if self.entities.contains_key(&id) && self.first_delivery(id, &env.from, env.seq) {
+                        if self.entities.contains_key(&id)
+                            && self.first_delivery(id, &env.from, env.seq)
+                        {
                             self.count_delivery(&env.from);
                             self.act(id, tick, *msg, body, &from);
                         }
@@ -523,8 +600,12 @@ impl GroupWorld {
     /// Run every handler registered for action `msg` on entity `id`, in order.
     fn act(&mut self, id: EntityId, tick: u64, msg: u16, body: &[u8], from: &Incoming) {
         let rules = self.rules.clone();
-        let Some(info) = rules.message(msg) else { return };
-        let Some(action) = (info.decode)(body) else { return };
+        let Some(info) = rules.message(msg) else {
+            return;
+        };
+        let Some(action) = (info.decode)(body) else {
+            return;
+        };
         self.with_me(id, tick, from.trace, &[], |me| {
             for handler in &info.actions {
                 if me.despawned() {
@@ -545,7 +626,9 @@ impl GroupWorld {
 
     /// Record who sent it on the entity; false if it was already delivered.
     fn first_delivery(&mut self, id: EntityId, from: &Facts, seq: u64) -> bool {
-        let Some(record) = self.entities.get_mut(&id) else { return false };
+        let Some(record) = self.entities.get_mut(&id) else {
+            return false;
+        };
         let key = (from.id, seq, from.group == 0);
         let recent = &mut record.meta.recent;
         if recent.contains(&key) {
@@ -577,13 +660,35 @@ impl GroupWorld {
         let mut reports: BTreeMap<GroupId, GroupReport> = self
             .spatial
             .iter()
-            .map(|&s| (s, GroupReport { group, tick, entities: Vec::new(), queries: Vec::new(), events: Vec::new() }))
+            .map(|&s| {
+                (
+                    s,
+                    GroupReport {
+                        group,
+                        tick,
+                        entities: Vec::new(),
+                        queries: Vec::new(),
+                        events: Vec::new(),
+                    },
+                )
+            })
             .collect();
         for record in self.entities.values() {
             let e = &record.entity;
-            let Some(report) = self.spatial_at(e.x, e.y).and_then(|s| reports.get_mut(&s)) else { continue };
-            let Some(parts) = self.rules.encode(e.components.iter(), true) else { continue };
-            report.entities.push(Reported { id: e.id, x: e.x, y: e.y, player: e.player, kind: e.kind, parts });
+            let Some(report) = self.spatial_at(e.x, e.y).and_then(|s| reports.get_mut(&s)) else {
+                continue;
+            };
+            let Some(parts) = self.rules.encode(e.components.iter(), true) else {
+                continue;
+            };
+            report.entities.push(Reported {
+                id: e.id,
+                x: e.x,
+                y: e.y,
+                player: e.player,
+                kind: e.kind,
+                parts,
+            });
         }
         for q in std::mem::take(&mut self.queries) {
             for s in self.spatial_in_circle(q.x, q.y, q.r) {
@@ -593,7 +698,10 @@ impl GroupWorld {
             }
         }
         for ev in std::mem::take(&mut self.events) {
-            if let Some(report) = self.spatial_at(ev.x, ev.y).and_then(|s| reports.get_mut(&s)) {
+            if let Some(report) = self
+                .spatial_at(ev.x, ev.y)
+                .and_then(|s| reports.get_mut(&s))
+            {
                 report.events.push(ev);
             }
         }
@@ -605,18 +713,41 @@ impl GroupWorld {
     pub fn take_releases(&mut self, tick: u64) -> Vec<(GroupId, Envelope)> {
         let mut out = Vec::new();
         for (id, to) in std::mem::take(&mut self.releases) {
-            let Some(mut record) = self.entities.remove(&id) else { continue };
+            let Some(mut record) = self.entities.remove(&id) else {
+                continue;
+            };
             if let Some(schedule) = self.schedule.remove(&id) {
-                record.meta.pending =
-                    schedule.into_iter().map(|((t, sub), (seq, input))| (t, sub, seq, serde_bytes::ByteBuf::from(input))).collect();
+                record.meta.pending = schedule
+                    .into_iter()
+                    .map(|((t, sub), (seq, input))| {
+                        (t, sub, seq, serde_bytes::ByteBuf::from(input))
+                    })
+                    .collect();
             }
             self.senses.remove(&id);
-            self.moved.insert(id, (to, tick + time::ticks_in(FORWARD_FOR_MS)));
+            self.moved
+                .insert(id, (to, tick + time::ticks_in(FORWARD_FOR_MS)));
             self.counters.handoffs += 1;
             let e = &record.entity;
-            let from = Facts { id, group: self.group_id, x: e.x, y: e.y, tick: record.meta.last_tick };
-            let Some(bytes) = record.encode(&self.rules) else { continue };
-            let env = Envelope { to: Address::Group { id: to }, from, via: self.group_id, seq: 0, trace: 0, hops: 0, kind: Kind::Handoff { entity: bytes } };
+            let from = Facts {
+                id,
+                group: self.group_id,
+                x: e.x,
+                y: e.y,
+                tick: record.meta.last_tick,
+            };
+            let Some(bytes) = record.encode(&self.rules) else {
+                continue;
+            };
+            let env = Envelope {
+                to: Address::Group { id: to },
+                from,
+                via: self.group_id,
+                seq: 0,
+                trace: 0,
+                hops: 0,
+                kind: Kind::Handoff { entity: bytes },
+            };
             out.push((to, env));
         }
         out
@@ -626,7 +757,11 @@ impl GroupWorld {
         Heartbeat {
             role: "group".into(),
             id: self.group_id,
-            entities: self.entities.values().map(|r| (r.entity.id, r.entity.x, r.entity.y)).collect(),
+            entities: self
+                .entities
+                .values()
+                .map(|r| (r.entity.id, r.entity.x, r.entity.y))
+                .collect(),
             ..Heartbeat::default()
         }
     }
@@ -687,7 +822,11 @@ struct LagQueue {
 impl LagQueue {
     fn push(&mut self, at: Instant, item: Inbound) {
         // Keep arrival order (messages from different subjects are gathered one subject at a time).
-        let i = self.held.iter().rposition(|(t, _)| *t <= at).map_or(0, |i| i + 1);
+        let i = self
+            .held
+            .iter()
+            .rposition(|(t, _)| *t <= at)
+            .map_or(0, |i| i + 1);
         self.held.insert(i, (at, item));
     }
 
@@ -721,7 +860,12 @@ struct Runner {
 }
 
 impl Runner {
-    async fn start(nats: &async_nats::Client, id: GroupId, rules: Arc<Rules>, assignment: Option<&Assignment>) -> Result<Self> {
+    async fn start(
+        nats: &async_nats::Client,
+        id: GroupId,
+        rules: Arc<Rules>,
+        assignment: Option<&Assignment>,
+    ) -> Result<Self> {
         let mut world = GroupWorld::new(id, rules);
         let mut lag = Duration::ZERO;
         if let Some(a) = assignment {
@@ -733,7 +877,8 @@ impl Runner {
         let senses = bus::subscribe_timed::<SenseAnswers>(nats, &group_senses_subject(id)).await?;
         bus::publish(nats, HEARTBEATS.to_string(), &world.heartbeat()).await;
         // Sends held-back messages when they're due; ends when the runner is dropped.
-        let (delayed, mut due) = tokio::sync::mpsc::unbounded_channel::<(Instant, String, Vec<u8>)>();
+        let (delayed, mut due) =
+            tokio::sync::mpsc::unbounded_channel::<(Instant, String, Vec<u8>)>();
         let sender = nats.clone();
         tokio::spawn(async move {
             while let Some((at, subject, payload)) = due.recv().await {
@@ -742,7 +887,17 @@ impl Runner {
             }
         });
         info!(group = format!("{id:04x}"), "Server Entity Group started");
-        Ok(Self { world, inbox, broadcast, senses, entity_subs: BTreeMap::new(), lag, received: LagQueue::default(), delayed, last_due: Instant::now() })
+        Ok(Self {
+            world,
+            inbox,
+            broadcast,
+            senses,
+            entity_subs: BTreeMap::new(),
+            lag,
+            received: LagQueue::default(),
+            delayed,
+            last_due: Instant::now(),
+        })
     }
 
     fn lagging(&self) -> bool {
@@ -772,7 +927,13 @@ impl Runner {
 
     /// One tick of this group: take in what arrived, simulate, publish. Debug traffic goes into
     /// `bus_log` and `streams`, sent once for the whole process.
-    async fn tick(&mut self, nats: &async_nats::Client, tick: u64, bus_log: &mut Vec<BusMsg>, streams: &mut Vec<StreamMsg>) -> Result<()> {
+    async fn tick(
+        &mut self,
+        nats: &async_nats::Client,
+        tick: u64,
+        bus_log: &mut Vec<BusMsg>,
+        streams: &mut Vec<StreamMsg>,
+    ) -> Result<()> {
         let started = Instant::now();
         let id = self.world.group_id;
         let mut arrived: Vec<(Instant, Inbound)> = Vec::new();
@@ -812,7 +973,12 @@ impl Runner {
         // new group reports it from the next tick, so it never vanishes in between.
         let mut out: Vec<(String, Option<Vec<u8>>)> = Vec::new();
         for (spatial, report) in self.world.take_reports(tick) {
-            streams.push(StreamMsg { from: id, to: spatial, kind: StreamKind::Report, n: report.entities.len() as u32 });
+            streams.push(StreamMsg {
+                from: id,
+                to: spatial,
+                kind: StreamKind::Report,
+                n: report.entities.len() as u32,
+            });
             out.push((spatial_reports_subject(spatial), bus::encode_now(&report)));
         }
         for (to, env) in self.world.take_releases(tick) {
@@ -823,7 +989,13 @@ impl Runner {
         }
         let spawns = self.world.take_spawns();
         if !spawns.is_empty() {
-            out.push((SPAWNS.to_string(), bus::encode_now(&SpawnRequest { from_group: id, entities: spawns })));
+            out.push((
+                SPAWNS.to_string(),
+                bus::encode_now(&SpawnRequest {
+                    from_group: id,
+                    entities: spawns,
+                }),
+            ));
         }
         for (subject, payload) in out {
             if let Some(payload) = payload {
@@ -852,23 +1024,40 @@ impl Runner {
 
 /// This group's fake lag in the assignment.
 fn lag_of(a: &Assignment, group: GroupId) -> Duration {
-    let ms = a.group_lag.iter().find(|(g, _)| *g == group).map_or(0, |(_, ms)| *ms);
+    let ms = a
+        .group_lag
+        .iter()
+        .find(|(g, _)| *g == group)
+        .map_or(0, |(_, ms)| *ms);
     Duration::from_millis(u64::from(ms))
 }
 
 /// A group host process: runs its first group, then whatever groups the orchestrator starts here.
-pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, first_group: Option<GroupId>) -> Result<()> {
+pub async fn run(
+    nats: async_nats::Client,
+    rules: Arc<Rules>,
+    first_group: Option<GroupId>,
+) -> Result<()> {
     let host_id = random_process_id(false);
-    let first = first_group.filter(|&id| id != 0 && !worldmesh_core::subjects::is_spatial_id(id)).unwrap_or_else(|| random_process_id(false));
+    let first = first_group
+        .filter(|&id| id != 0 && !worldmesh_core::subjects::is_spatial_id(id))
+        .unwrap_or_else(|| random_process_id(false));
     let mut assignment: Option<Assignment> = None;
     let mut runners: BTreeMap<GroupId, Runner> = BTreeMap::new();
-    runners.insert(first, Runner::start(&nats, first, rules.clone(), None).await?);
+    runners.insert(
+        first,
+        Runner::start(&nats, first, rules.clone(), None).await?,
+    );
 
     let mut assignments = bus::subscribe::<Assignment>(&nats, ASSIGNMENTS).await?;
     let mut commands = bus::subscribe_timed::<GroupCommand>(&nats, GROUP_COMMANDS).await?;
     let mut hosts = bus::subscribe::<HostCommand>(&nats, HOST_COMMANDS).await?;
     stats::spawn_reporter(nats.clone(), "group-host", host_id);
-    info!(process = format!("{host_id:04x}"), tick_ms = time::tick_ms(), "group process running");
+    info!(
+        process = format!("{host_id:04x}"),
+        tick_ms = time::tick_ms(),
+        "group process running"
+    );
     let heartbeat = |runners: &BTreeMap<GroupId, Runner>| Heartbeat {
         role: "host".into(),
         id: host_id,
@@ -889,7 +1078,11 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, first_group: Optio
                 r.world.set_assignment(&a);
                 let lag = lag_of(&a, *id);
                 if lag != r.lag {
-                    info!(group = format!("{id:04x}"), ms = lag.as_millis() as u64, "fake lag");
+                    info!(
+                        group = format!("{id:04x}"),
+                        ms = lag.as_millis() as u64,
+                        "fake lag"
+                    );
                     r.lag = lag;
                 }
             }
@@ -901,7 +1094,9 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, first_group: Optio
             }
             for id in cmd.start {
                 if let std::collections::btree_map::Entry::Vacant(slot) = runners.entry(id) {
-                    slot.insert(Runner::start(&nats, id, rules.clone(), assignment.as_ref()).await?);
+                    slot.insert(
+                        Runner::start(&nats, id, rules.clone(), assignment.as_ref()).await?,
+                    );
                 }
             }
             for id in cmd.stop {
@@ -921,7 +1116,12 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, first_group: Optio
         for r in runners.values_mut() {
             r.tick(&nats, tick, &mut bus_log, &mut streams).await?;
         }
-        let report = DebugReport { from: host_id, tick, bus: bus_log, streams };
+        let report = DebugReport {
+            from: host_id,
+            tick,
+            bus: bus_log,
+            streams,
+        };
         bus::publish(&nats, DEBUG_REPORTS.to_string(), &report).await;
 
         if tick.is_multiple_of(time::ticks_in(500)) {
@@ -936,7 +1136,13 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, first_group: Optio
                 bus::publish(&nats, STATS.to_string(), &r.world.take_stats(secs)).await;
             }
         }
-        stats::PLAYERS.store(runners.values().map(|r| r.world.entity_count() as u64).sum(), Relaxed);
+        stats::PLAYERS.store(
+            runners
+                .values()
+                .map(|r| r.world.entity_count() as u64)
+                .sum(),
+            Relaxed,
+        );
         stats::record_tick(started.elapsed());
     }
 }

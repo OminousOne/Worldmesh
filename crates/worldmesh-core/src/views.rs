@@ -4,8 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-
-use crate::protocol::{Address, EntityId, Envelope, Facts, Kind, SenseDebug, SpatialViews, ViewEntity, WireEvent};
+use crate::protocol::{
+    Address, EntityId, Envelope, Facts, Kind, SenseDebug, SpatialViews, ViewEntity, WireEvent,
+};
 use crate::{codec, time};
 
 /// Numbers players' inputs and commands (unique per process, for ordering and dedupe).
@@ -22,7 +23,9 @@ pub fn merge_view(
     let mut events = Vec::new();
     let mut senses: BTreeMap<EntityId, SenseDebug> = BTreeMap::new();
     for cell in fresh {
-        let Some(v) = cell.views.iter().find(|v| v.player == player) else { continue };
+        let Some(v) = cell.views.iter().find(|v| v.player == player) else {
+            continue;
+        };
         for e in &v.entities {
             if entities.get(&e.id).is_none_or(|(t, _)| cell.tick > *t) {
                 entities.insert(e.id, (cell.tick, e.clone()));
@@ -41,13 +44,35 @@ pub fn merge_view(
             }
         }
     }
-    (entities.into_values().map(|(_, e)| e).collect(), events, senses.into_values().collect())
+    (
+        entities.into_values().map(|(_, e)| e).collect(),
+        events,
+        senses.into_values().collect(),
+    )
 }
 
 /// An envelope from a player (through a gateway) to their own entity.
 pub fn from_player(id: EntityId, kind: Kind, traced: bool) -> Envelope {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let trace = if traced { codec::splitmix64(seq ^ (u64::from(id) << 40)) } else { 0 };
-    let from = Facts { id, group: 0, x: 0.0, y: 0.0, tick: time::current_tick() };
-    Envelope { to: Address::Entity { id }, from, via: 0, seq, trace, hops: 0, kind }
+    let trace = if traced {
+        codec::splitmix64(seq ^ (u64::from(id) << 40))
+    } else {
+        0
+    };
+    let from = Facts {
+        id,
+        group: 0,
+        x: 0.0,
+        y: 0.0,
+        tick: time::current_tick(),
+    };
+    Envelope {
+        to: Address::Entity { id },
+        from,
+        via: 0,
+        seq,
+        trace,
+        hops: 0,
+        kind,
+    }
 }

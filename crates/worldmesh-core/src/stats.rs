@@ -26,7 +26,10 @@ impl Default for Counter {
 
 impl Counter {
     pub const fn new() -> Self {
-        Self { msgs: AtomicU64::new(0), bytes: AtomicU64::new(0) }
+        Self {
+            msgs: AtomicU64::new(0),
+            bytes: AtomicU64::new(0),
+        }
     }
 
     pub fn add(&self, bytes: usize) {
@@ -85,7 +88,9 @@ pub fn spawn_reporter(nats: async_nats::Client, role: &'static str, id: u32) {
             let cpu = cpu_time();
             let cpu_pct = match (last_cpu, cpu) {
                 // A thread that exited takes its time with it; never report negative use.
-                (Some(before), Some(after)) => Some(after.saturating_sub(before).as_secs_f32() / secs * 100.0),
+                (Some(before), Some(after)) => {
+                    Some(after.saturating_sub(before).as_secs_f32() / secs * 100.0)
+                }
                 _ => None,
             };
             last_cpu = cpu;
@@ -135,7 +140,9 @@ fn cpu_time() -> Option<Duration> {
 fn threads_cpu_time() -> Option<Duration> {
     let mut ns = 0u64;
     for task in std::fs::read_dir("/proc/self/task").ok()? {
-        let Ok(text) = std::fs::read_to_string(task.ok()?.path().join("schedstat")) else { continue };
+        let Ok(text) = std::fs::read_to_string(task.ok()?.path().join("schedstat")) else {
+            continue;
+        };
         ns += text.split_whitespace().next()?.parse::<u64>().ok()?;
     }
     (ns > 0).then(|| Duration::from_nanos(ns))
@@ -146,8 +153,12 @@ fn process_cpu_time() -> Option<Duration> {
     let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
     // Skip "pid (command name) "; the name may contain spaces. Field 3 (state) is then
     // index 0, so utime (field 14) and stime (field 15) are at 11 and 12.
-    let fields: Vec<&str> = stat.get(stat.rfind(')')? + 2..)?.split_whitespace().collect();
-    let clock_ticks: u64 = fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
+    let fields: Vec<&str> = stat
+        .get(stat.rfind(')')? + 2..)?
+        .split_whitespace()
+        .collect();
+    let clock_ticks: u64 =
+        fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
     Some(Duration::from_millis(clock_ticks * 10)) // 100 clock ticks per second on Linux
 }
 
@@ -177,13 +188,27 @@ impl NatsMonitor {
         let body = http_get(&self.addr, "/varz").await?;
         let v: serde_json::Value = serde_json::from_slice(&body).ok()?;
         let num = |key: &str| v.get(key).and_then(|x| x.as_f64()).unwrap_or(0.0);
-        let totals = [num("in_msgs"), num("out_msgs"), num("in_bytes"), num("out_bytes")];
+        let totals = [
+            num("in_msgs"),
+            num("out_msgs"),
+            num("in_bytes"),
+            num("out_bytes"),
+        ];
         let now = Instant::now();
         let (bus_in, bus_out) = match self.last.replace((now, totals)) {
             Some((then, prev)) => {
                 let secs = now.duration_since(then).as_secs_f64().max(0.001);
                 let per_sec = |i: usize| ((totals[i] - prev[i]).max(0.0) / secs) as f32;
-                (Rate { msgs: per_sec(0), bytes: per_sec(2) }, Rate { msgs: per_sec(1), bytes: per_sec(3) })
+                (
+                    Rate {
+                        msgs: per_sec(0),
+                        bytes: per_sec(2),
+                    },
+                    Rate {
+                        msgs: per_sec(1),
+                        bytes: per_sec(3),
+                    },
+                )
             }
             None => (Rate::default(), Rate::default()),
         };
@@ -209,5 +234,8 @@ async fn http_get(addr: &str, path: &str) -> Option<Vec<u8>> {
         let body = buf.windows(4).position(|w| w == b"\r\n\r\n")? + 4;
         Some(buf[body..].to_vec())
     };
-    tokio::time::timeout(Duration::from_millis(500), request).await.ok().flatten()
+    tokio::time::timeout(Duration::from_millis(500), request)
+        .await
+        .ok()
+        .flatten()
 }

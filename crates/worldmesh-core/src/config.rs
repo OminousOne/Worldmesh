@@ -25,7 +25,16 @@ pub struct WorldConfig {
 
 impl Default for WorldConfig {
     fn default() -> Self {
-        Self { width: 64, height: 64, chunk_size: 8, view: ViewShape::Rect { half_w: 20.0, half_h: 12.0 }, input_substeps: 16 }
+        Self {
+            width: 64,
+            height: 64,
+            chunk_size: 8,
+            view: ViewShape::Rect {
+                half_w: 20.0,
+                half_h: 12.0,
+            },
+            input_substeps: 16,
+        }
     }
 }
 
@@ -45,19 +54,26 @@ impl ViewShape {
     pub fn contains(&self, vx: f32, vy: f32, x: f32, y: f32, margin: f32) -> bool {
         let (dx, dy) = (x - vx, y - vy);
         match *self {
-            ViewShape::Rect { half_w, half_h } => dx.abs() <= half_w + margin && dy.abs() <= half_h + margin,
-            ViewShape::Iso { half_w, half_h } => (dx - dy).abs() <= half_w + margin && (dx + dy).abs() <= half_h + margin,
+            ViewShape::Rect { half_w, half_h } => {
+                dx.abs() <= half_w + margin && dy.abs() <= half_h + margin
+            }
+            ViewShape::Iso { half_w, half_h } => {
+                (dx - dy).abs() <= half_w + margin && (dx + dy).abs() <= half_h + margin
+            }
         }
     }
 
     /// Could any of the box [x0, x1] x [y0, y1] be visible to a player at (vx, vy)?
     pub fn overlaps_box(&self, vx: f32, vy: f32, x0: f32, y0: f32, x1: f32, y1: f32) -> bool {
         match *self {
-            ViewShape::Rect { half_w, half_h } => x1 - vx >= -half_w && x0 - vx <= half_w && y1 - vy >= -half_h && y0 - vy <= half_h,
+            ViewShape::Rect { half_w, half_h } => {
+                x1 - vx >= -half_w && x0 - vx <= half_w && y1 - vy >= -half_h && y0 - vy <= half_h
+            }
             ViewShape::Iso { half_w, half_h } => {
                 // Both shapes are convex: they overlap unless one of the view's axes
                 // (u = dx - dy, v = dx + dy) or the box's (x, y) separates them.
-                let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| (x - vx, y - vy));
+                let corners =
+                    [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| (x - vx, y - vy));
                 let (umin, umax) = minmax(corners.map(|(dx, dy)| dx - dy));
                 let (vmin, vmax) = minmax(corners.map(|(dx, dy)| dx + dy));
                 let half = (half_w + half_h) / 2.0; // the view's extent along x and y
@@ -75,7 +91,11 @@ impl ViewShape {
 }
 
 fn minmax<const N: usize>(values: [f32; N]) -> (f32, f32) {
-    values.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| (lo.min(v), hi.max(v)))
+    values
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        })
 }
 
 impl WorldConfig {
@@ -103,7 +123,10 @@ impl WorldConfig {
     /// (x0, y0, x1, y1) in tiles of chunk `i`.
     pub fn chunk_bounds(&self, i: usize) -> (f32, f32, f32, f32) {
         let cs = self.chunk_size as f32;
-        let (cx, cy) = ((i as u32 % self.chunks_x()) as f32, (i as u32 / self.chunks_x()) as f32);
+        let (cx, cy) = (
+            (i as u32 % self.chunks_x()) as f32,
+            (i as u32 / self.chunks_x()) as f32,
+        );
         (cx * cs, cy * cs, (cx + 1.0) * cs, (cy + 1.0) * cs)
     }
 
@@ -158,7 +181,9 @@ impl WorldConfig {
     /// Quantization step for other entities' positions in optimized snapshots: positions are
     /// sent as `u16` steps of `1 / pos_scale` tiles.
     pub fn pos_scale(&self) -> f32 {
-        (65535.0 / self.width.max(self.height).max(1) as f32).floor().clamp(1.0, 4096.0)
+        (65535.0 / self.width.max(self.height).max(1) as f32)
+            .floor()
+            .clamp(1.0, 4096.0)
     }
 }
 
@@ -239,7 +264,12 @@ mod tests {
     use super::*;
 
     fn world() -> WorldConfig {
-        WorldConfig { width: 64, height: 64, chunk_size: 8, ..WorldConfig::default() }
+        WorldConfig {
+            width: 64,
+            height: 64,
+            chunk_size: 8,
+            ..WorldConfig::default()
+        }
     }
 
     #[test]
@@ -250,7 +280,11 @@ mod tests {
         assert_eq!(i, 8 + 2);
         let (x0, y0, x1, y1) = w.chunk_bounds(i);
         assert!((x0..x1).contains(&17.5) && (y0..y1).contains(&9.2));
-        assert_eq!(w.chunk_at(-5.0, 1000.0), 56, "off the map clamps to the edge");
+        assert_eq!(
+            w.chunk_at(-5.0, 1000.0),
+            56,
+            "off the map clamps to the edge"
+        );
     }
 
     #[test]
@@ -277,7 +311,12 @@ mod tests {
 
     #[test]
     fn hilbert_order_skips_chunks_outside_a_non_square_world() {
-        let w = WorldConfig { width: 48, height: 16, chunk_size: 8, ..WorldConfig::default() };
+        let w = WorldConfig {
+            width: 48,
+            height: 16,
+            chunk_size: 8,
+            ..WorldConfig::default()
+        };
         let order = w.chunks_in_hilbert_order();
         assert_eq!(order.len(), 12);
         assert!(order.iter().all(|&c| c < 12));
@@ -299,20 +338,32 @@ mod tests {
         for cell in [7, 8, 9, 10] {
             assert_eq!(owners.iter().filter(|&&o| o == cell).count(), 16);
         }
-        let runs = order.windows(2).filter(|p| owners[p[0]] != owners[p[1]]).count();
+        let runs = order
+            .windows(2)
+            .filter(|p| owners[p[0]] != owners[p[1]])
+            .count();
         assert_eq!(runs, 3, "each cell owns one run of the curve");
     }
 
     #[test]
     fn views_see_what_they_should() {
-        let rect = ViewShape::Rect { half_w: 10.0, half_h: 5.0 };
+        let rect = ViewShape::Rect {
+            half_w: 10.0,
+            half_h: 5.0,
+        };
         assert!(rect.contains(0.0, 0.0, 9.0, -4.0, 0.0));
         assert!(!rect.contains(0.0, 0.0, 0.0, 6.0, 0.0));
         assert!(rect.overlaps_box(0.0, 0.0, 9.0, 4.0, 20.0, 20.0));
-        let iso = ViewShape::Iso { half_w: 32.0, half_h: 36.0 };
+        let iso = ViewShape::Iso {
+            half_w: 32.0,
+            half_h: 36.0,
+        };
         assert!(iso.contains(32.0, 32.0, 50.0, 50.0, 0.0), "down the screen");
         assert!(!iso.contains(32.0, 32.0, 52.0, 52.0, 0.0));
         assert!(iso.overlaps_box(32.0, 32.0, 48.0, 48.0, 56.0, 56.0));
-        assert!(!iso.overlaps_box(32.0, 32.0, 60.0, 0.0, 64.0, 4.0), "far corner");
+        assert!(
+            !iso.overlaps_box(32.0, 32.0, 60.0, 0.0, 64.0, 4.0),
+            "far corner"
+        );
     }
 }

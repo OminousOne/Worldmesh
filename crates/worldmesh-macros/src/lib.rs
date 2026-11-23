@@ -41,7 +41,11 @@ fn derive(input: TokenStream, trait_path: proc_macro2::TokenStream) -> TokenStre
 /// The `name` in `#[worldmesh(name = "...")]`, if given.
 fn name_attr(input: &DeriveInput) -> syn::Result<Option<String>> {
     let mut name = None;
-    for attr in input.attrs.iter().filter(|a| a.path().is_ident("worldmesh")) {
+    for attr in input
+        .attrs
+        .iter()
+        .filter(|a| a.path().is_ident("worldmesh"))
+    {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("name") {
                 let value: LitStr = meta.value()?.parse()?;

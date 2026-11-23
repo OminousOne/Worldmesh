@@ -153,7 +153,12 @@ impl World {
             "two components are named {:?}: give one another name with #[worldmesh(name = \"...\")]",
             T::NAME
         );
-        self.components.push(ComponentInfo { name: T::NAME, visible, type_id, decode: decode_component::<T> });
+        self.components.push(ComponentInfo {
+            name: T::NAME,
+            visible,
+            type_id,
+            decode: decode_component::<T>,
+        });
         self
     }
 
@@ -173,7 +178,10 @@ impl World {
     pub fn input<I: Wire>(&mut self) -> &mut Self {
         let type_id = TypeId::of::<I>();
         if let Some((existing, _)) = self.input {
-            assert!(existing == type_id, "a world has one input type; it's already registered");
+            assert!(
+                existing == type_id,
+                "a world has one input type; it's already registered"
+            );
         }
         self.input = Some((type_id, from_json::<I>));
         self
@@ -183,7 +191,13 @@ impl World {
         let type_id = TypeId::of::<M>();
         if let Some(i) = self.messages.iter().position(|m| m.type_id == type_id) {
             let m = &mut self.messages[i];
-            assert!(m.category == category, "{:?} is already registered as a {:?}, not a {:?}", M::NAME, m.category, category);
+            assert!(
+                m.category == category,
+                "{:?} is already registered as a {:?}, not a {:?}",
+                M::NAME,
+                m.category,
+                category
+            );
             return m;
         }
         assert!(
@@ -205,7 +219,10 @@ impl World {
 
     /// A command players can send their own entity, and what it does. Register more than one
     /// handler to have several features react; they run in registration order.
-    pub fn command<C: Message>(&mut self, handler: impl Fn(&mut Me<'_>, &C) + Send + Sync + 'static) -> &mut Self {
+    pub fn command<C: Message>(
+        &mut self,
+        handler: impl Fn(&mut Me<'_>, &C) + Send + Sync + 'static,
+    ) -> &mut Self {
         let run: CommandHandler = Arc::new(move |me, any| {
             if let Some(c) = any.downcast_ref::<C>() {
                 handler(me, c)
@@ -238,22 +255,41 @@ impl World {
     }
 
     /// Run `f` for every entity, every tick, at `stage`.
-    pub fn system(&mut self, stage: Stage, f: impl Fn(&mut Me<'_>) + Send + Sync + 'static) -> &mut Self {
-        self.systems.push(SystemInfo { stage, only: None, run: Arc::new(f) });
+    pub fn system(
+        &mut self,
+        stage: Stage,
+        f: impl Fn(&mut Me<'_>) + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.systems.push(SystemInfo {
+            stage,
+            only: None,
+            run: Arc::new(f),
+        });
         self
     }
 
     /// Run `f` every tick at `stage`, for entities that have a `T`.
-    pub fn system_for<T: Component>(&mut self, stage: Stage, f: impl Fn(&mut Me<'_>) + Send + Sync + 'static) -> &mut Self {
-        self.systems.push(SystemInfo { stage, only: Some(TypeId::of::<T>()), run: Arc::new(f) });
+    pub fn system_for<T: Component>(
+        &mut self,
+        stage: Stage,
+        f: impl Fn(&mut Me<'_>) + Send + Sync + 'static,
+    ) -> &mut Self {
+        self.systems.push(SystemInfo {
+            stage,
+            only: Some(TypeId::of::<T>()),
+            run: Arc::new(f),
+        });
         self
     }
 
     /// A kind of entity, and the components it starts with. Spawn one with
     /// [`Spawn::new`]`(name, x, y)`. Its components are registered if they aren't yet (as
     /// not visible).
+    ///
+    /// Calling it again with the same name adds to that kind, so each plugin can give a
+    /// shared kind its own components (a combat plugin adds health to "hero" and "bot", a
+    /// bots plugin adds a brain to "bot").
     pub fn kind(&mut self, name: &str, defaults: Bundle) -> &mut Self {
-        assert!(!self.kinds.iter().any(|k| k.name == name), "two kinds are named {name:?}");
         for c in &defaults.items {
             let type_id = c.as_any().type_id();
             if !self.components.iter().any(|i| i.type_id == type_id) {
@@ -262,10 +298,21 @@ impl World {
                     "two components are named {:?}: give one another name with #[worldmesh(name = \"...\")]",
                     c.type_name()
                 );
-                self.components.push(ComponentInfo { name: c.type_name(), visible: false, type_id, decode: c.decoder() });
+                self.components.push(ComponentInfo {
+                    name: c.type_name(),
+                    visible: false,
+                    type_id,
+                    decode: c.decoder(),
+                });
             }
         }
-        self.kinds.push(KindInfo { name: name.to_string(), defaults });
+        match self.kinds.iter_mut().find(|k| k.name == name) {
+            Some(kind) => kind.defaults.merge(defaults),
+            None => self.kinds.push(KindInfo {
+                name: name.to_string(),
+                defaults,
+            }),
+        }
         self
     }
 
@@ -284,13 +331,39 @@ impl World {
 
     /// Check everything fits together and freeze it.
     pub fn build(self) -> Arc<Rules> {
-        let World { config, mut components, messages, kinds, systems, input, join, welcome } = self;
-        let join = join.expect("the world needs a join function: world.join(|player| Spawn::new(kind, x, y))");
+        let World {
+            config,
+            mut components,
+            messages,
+            kinds,
+            systems,
+            input,
+            join,
+            welcome,
+        } = self;
+        let join = join
+            .expect("the world needs a join function: world.join(|player| Spawn::new(kind, x, y))");
         components.shrink_to_fit();
-        let component_ids = components.iter().enumerate().map(|(i, c)| (c.type_id, i as u16)).collect();
-        let message_ids = messages.iter().enumerate().map(|(i, m)| (m.type_id, i as u16)).collect();
-        let message_names = messages.iter().enumerate().map(|(i, m)| (m.name, i as u16)).collect();
-        let kind_ids = kinds.iter().enumerate().map(|(i, k)| (k.name.clone(), i as u16)).collect();
+        let component_ids = components
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.type_id, i as u16))
+            .collect();
+        let message_ids = messages
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.type_id, i as u16))
+            .collect();
+        let message_names = messages
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.name, i as u16))
+            .collect();
+        let kind_ids = kinds
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (k.name.clone(), i as u16))
+            .collect();
         let mut staged: [Vec<(Option<TypeId>, System)>; 3] = Default::default();
         for s in systems {
             staged[s.stage as usize].push((s.only, s.run));
@@ -384,7 +457,10 @@ impl Rules {
     /// A player's command from a client: (message id, encoded), if `name` is a command and
     /// `value` reads as it.
     pub fn command_from_json(&self, name: &str, value: Value) -> Result<(u16, Vec<u8>), String> {
-        let id = *self.message_names.get(name).ok_or_else(|| format!("no message is named {name:?}"))?;
+        let id = *self
+            .message_names
+            .get(name)
+            .ok_or_else(|| format!("no message is named {name:?}"))?;
         let m = &self.messages[usize::from(id)];
         if m.category != Category::Command {
             return Err(format!("{name:?} isn't a command"));
@@ -410,11 +486,18 @@ impl Rules {
 
     /// Components as parts, sorted by id; `visible_only` keeps just the visible ones. None
     /// if one isn't registered.
-    pub(crate) fn encode<'a>(&self, components: impl Iterator<Item = &'a Box<dyn AnyComponent>>, visible_only: bool) -> Option<Vec<Part>> {
+    pub(crate) fn encode<'a>(
+        &self,
+        components: impl Iterator<Item = &'a Box<dyn AnyComponent>>,
+        visible_only: bool,
+    ) -> Option<Vec<Part>> {
         let mut parts = Vec::new();
         for c in components {
             let Some(id) = self.component_id_of(c.as_any().type_id()) else {
-                tracing::error!(component = c.type_name(), "a component that isn't registered: add world.component::<..>()");
+                tracing::error!(
+                    component = c.type_name(),
+                    "a component that isn't registered: add world.component::<..>()"
+                );
                 return None;
             };
             if visible_only && !self.components[usize::from(id)].visible {
@@ -427,7 +510,15 @@ impl Rules {
     }
 
     /// A new entity: its kind's components, then the extras on top.
-    pub fn new_entity(&self, id: EntityId, x: f32, y: f32, player: bool, kind: u16, extras: &[Part]) -> Option<Entity> {
+    pub fn new_entity(
+        &self,
+        id: EntityId,
+        x: f32,
+        y: f32,
+        player: bool,
+        kind: u16,
+        extras: &[Part],
+    ) -> Option<Entity> {
         let info = self.kinds.get(usize::from(kind))?;
         let mut entity = Entity::new(id, x, y, player, kind);
         for c in &info.defaults.items {

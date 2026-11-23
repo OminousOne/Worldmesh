@@ -21,8 +21,8 @@ use std::sync::Arc;
 use serde::Serialize;
 use worldmesh_core::config::{partition, WorldConfig};
 use worldmesh_core::protocol::{
-    Assignment, EntityId, Envelope, GroupCommand, GroupCommandKind, GroupId, Kind, NewEntity, SpatialViews, Viewer, Viewers,
-    WireEvent, SPAWNED_ID_START,
+    Assignment, EntityId, Envelope, GroupCommand, GroupCommandKind, GroupId, Kind, NewEntity,
+    SpatialViews, Viewer, Viewers, WireEvent, SPAWNED_ID_START,
 };
 use worldmesh_core::subjects::{BROADCAST, SPATIAL_ID_BIT};
 use worldmesh_core::views::{from_player, merge_view};
@@ -53,7 +53,10 @@ pub struct Seen {
 impl Seen {
     /// One of its visible components, decoded.
     pub fn get<T: Component>(&self) -> Option<T> {
-        self.components.iter().find(|(n, _)| n == T::NAME).and_then(|(_, b)| codec::from_bytes(b))
+        self.components
+            .iter()
+            .find(|(n, _)| n == T::NAME)
+            .and_then(|(_, b)| codec::from_bytes(b))
     }
 
     pub fn has<T: Component>(&self) -> bool {
@@ -92,7 +95,11 @@ impl TestWorld {
             chunk_size: config.chunk_size,
             chunks_x: config.chunks_x(),
             chunks_y: config.chunks_y(),
-            owners: partition(&config.chunks_in_hilbert_order(), &vec![1.0; count], &cell_ids),
+            owners: partition(
+                &config.chunks_in_hilbert_order(),
+                &vec![1.0; count],
+                &cell_ids,
+            ),
             spatial: cell_ids.clone(),
             groups: group_ids.clone(),
             spatial_running: cell_ids.len() as u32,
@@ -161,8 +168,21 @@ impl TestWorld {
     /// Like [`TestWorld::join`], in a chosen group.
     pub fn join_in(&mut self, group: GroupId, player: EntityId) -> EntityId {
         let spawn = self.rules.join(player);
-        let (kind, parts) = self.rules.encode_spawn(&spawn).expect("the join function's kind is registered");
-        self.place(group, NewEntity { id: player, x: spawn.x, y: spawn.y, player: true, kind, parts });
+        let (kind, parts) = self
+            .rules
+            .encode_spawn(&spawn)
+            .expect("the join function's kind is registered");
+        self.place(
+            group,
+            NewEntity {
+                id: player,
+                x: spawn.x,
+                y: spawn.y,
+                player: true,
+                kind,
+                parts,
+            },
+        );
         self.viewers.insert(player);
         player
     }
@@ -172,20 +192,38 @@ impl TestWorld {
         let id = self.next_spawn_id;
         self.next_spawn_id += 1;
         let (kind, parts) = self.rules.encode_spawn(&spawn).expect("a registered kind");
-        self.place(group, NewEntity { id, x: spawn.x, y: spawn.y, player: false, kind, parts });
+        self.place(
+            group,
+            NewEntity {
+                id,
+                x: spawn.x,
+                y: spawn.y,
+                player: false,
+                kind,
+                parts,
+            },
+        );
         id
     }
 
     fn place(&mut self, group: GroupId, entity: NewEntity) {
         let g = self.groups.get_mut(&group).expect("a group of this world");
-        g.command(GroupCommand { to: Some(group), kind: GroupCommandKind::Spawn { entities: vec![entity] } });
+        g.command(GroupCommand {
+            to: Some(group),
+            kind: GroupCommandKind::Spawn {
+                entities: vec![entity],
+            },
+        });
     }
 
     /// A player disconnects: their entity is removed wherever it is.
     pub fn leave(&mut self, player: EntityId) {
         self.viewers.remove(&player);
         for g in self.groups.values_mut() {
-            g.command(GroupCommand { to: None, kind: GroupCommandKind::Leave { id: player } });
+            g.command(GroupCommand {
+                to: None,
+                kind: GroupCommandKind::Leave { id: player },
+            });
         }
     }
 
@@ -198,20 +236,38 @@ impl TestWorld {
     /// A player's input for sub-step `sub` of tick `tick`.
     pub fn input_at(&mut self, player: EntityId, tick: u64, sub: u8, input: impl Serialize) {
         let input = codec::to_bytes(&input).expect("the input encodes");
-        let mut env = from_player(player, Kind::Input { at_tick: tick, sub, input }, false);
+        let mut env = from_player(
+            player,
+            Kind::Input {
+                at_tick: tick,
+                sub,
+                input,
+            },
+            false,
+        );
         env.from.tick = self.tick;
-        self.pending.push((worldmesh_core::subjects::entity_subject(player), env));
+        self.pending
+            .push((worldmesh_core::subjects::entity_subject(player), env));
     }
 
     /// A player's command, handled by their entity on the next tick. Panics if `C` isn't
     /// registered as a command.
     pub fn command<C: Message>(&mut self, player: EntityId, command: C) {
-        let msg = self.rules.message_id::<C>().unwrap_or_else(|| panic!("{} isn't registered", C::NAME));
-        assert_eq!(self.rules.message(msg).map(|m| m.category), Some(Category::Command), "{} isn't a command", C::NAME);
+        let msg = self
+            .rules
+            .message_id::<C>()
+            .unwrap_or_else(|| panic!("{} isn't registered", C::NAME));
+        assert_eq!(
+            self.rules.message(msg).map(|m| m.category),
+            Some(Category::Command),
+            "{} isn't a command",
+            C::NAME
+        );
         let body = codec::to_bytes(&command).expect("the command encodes");
         let mut env = from_player(player, Kind::Command { msg, body }, true);
         env.from.tick = self.tick;
-        self.pending.push((worldmesh_core::subjects::entity_subject(player), env));
+        self.pending
+            .push((worldmesh_core::subjects::entity_subject(player), env));
     }
 
     /// Move an entity to another group, as the orchestrator would: it's handed off live at
@@ -219,7 +275,12 @@ impl TestWorld {
     pub fn hand_off(&mut self, id: EntityId, to: GroupId) {
         if let Some(from) = self.group_of(id) {
             let g = self.groups.get_mut(&from).expect("listed");
-            g.command(GroupCommand { to: Some(from), kind: GroupCommandKind::Release { moves: vec![(id, to)] } });
+            g.command(GroupCommand {
+                to: Some(from),
+                kind: GroupCommandKind::Release {
+                    moves: vec![(id, to)],
+                },
+            });
         }
     }
 
@@ -239,7 +300,11 @@ impl TestWorld {
         for (&id, g) in self.groups.iter_mut() {
             g.step(tick);
             reports.extend(g.take_reports(tick));
-            sent.extend(g.take_releases(tick).into_iter().map(|(to, env)| (worldmesh_core::subjects::group_inbox_subject(to), env)));
+            sent.extend(
+                g.take_releases(tick)
+                    .into_iter()
+                    .map(|(to, env)| (worldmesh_core::subjects::group_inbox_subject(to), env)),
+            );
             sent.extend(g.take_outbox());
             spawned.extend(g.take_spawns().into_iter().map(|e| (id, e)));
         }
@@ -247,7 +312,10 @@ impl TestWorld {
         self.events.clear();
         for (cell, report) in reports {
             for ev in &report.events {
-                self.events.push(WireEvent { msg: ev.msg, body: ev.body.clone() });
+                self.events.push(WireEvent {
+                    msg: ev.msg,
+                    body: ev.body.clone(),
+                });
             }
             if let Some(c) = self.cells.get_mut(&cell) {
                 c.receive_report(report);
@@ -266,12 +334,21 @@ impl TestWorld {
         let viewers: Vec<Viewer> = self
             .viewers
             .iter()
-            .filter_map(|&p| self.entity(p).map(|e| Viewer { player: p, x: e.x, y: e.y }))
+            .filter_map(|&p| {
+                self.entity(p).map(|e| Viewer {
+                    player: p,
+                    x: e.x,
+                    y: e.y,
+                })
+            })
             .collect();
         self.views.clear();
         let mut answers = Vec::new();
         for c in self.cells.values_mut() {
-            c.receive_viewers(Viewers { tick, viewers: viewers.clone() });
+            c.receive_viewers(Viewers {
+                tick,
+                viewers: viewers.clone(),
+            });
             answers.extend(c.answer(tick));
             self.views.push(c.build_views(tick));
         }
@@ -312,7 +389,9 @@ impl TestWorld {
         let mut parts = subject.split('.');
         match (parts.next(), parts.next(), parts.next()) {
             (Some("entity"), Some(id), None) => {
-                let Ok(id) = id.parse::<EntityId>() else { return };
+                let Ok(id) = id.parse::<EntityId>() else {
+                    return;
+                };
                 // Everyone listening hears it: the entity's group, and its previous group for
                 // a moment after a handoff (which forwards it; receivers drop duplicates).
                 for g in self.groups.values_mut() {
@@ -327,12 +406,22 @@ impl TestWorld {
                 }
             }
             (Some("group"), Some(id), Some("inbox")) => {
-                if let Some(g) = id.parse().ok().and_then(|id: GroupId| self.groups.get_mut(&id)) {
+                if let Some(g) = id
+                    .parse()
+                    .ok()
+                    .and_then(|id: GroupId| self.groups.get_mut(&id))
+                {
                     g.receive(env);
                 }
             }
             (Some("spatial"), Some(id), Some("inbox")) => {
-                let Some(c) = id.parse().ok().and_then(|id: GroupId| self.cells.get_mut(&id)) else { return };
+                let Some(c) = id
+                    .parse()
+                    .ok()
+                    .and_then(|id: GroupId| self.cells.get_mut(&id))
+                else {
+                    return;
+                };
                 c.route_area(env);
                 for (subject, env) in c.take_outbox() {
                     self.deliver(&subject, env);
@@ -349,12 +438,18 @@ impl TestWorld {
 
     /// The group simulating an entity.
     pub fn group_of(&self, id: EntityId) -> Option<GroupId> {
-        self.groups.iter().find(|(_, g)| g.entity(id).is_some()).map(|(&id, _)| id)
+        self.groups
+            .iter()
+            .find(|(_, g)| g.entity(id).is_some())
+            .map(|(&id, _)| id)
     }
 
     /// Every entity in the world: (group, entity).
     pub fn entities(&self) -> Vec<(GroupId, &Entity)> {
-        self.groups.iter().flat_map(|(&id, g)| g.entities().map(move |e| (id, e))).collect()
+        self.groups
+            .iter()
+            .flat_map(|(&id, g)| g.entities().map(move |e| (id, e)))
+            .collect()
     }
 
     /// The events of type `E` from the last step, in the order they happened.
@@ -364,7 +459,10 @@ impl TestWorld {
 
     /// The names of every event from the last step, in the order they happened.
     pub fn event_names(&self) -> Vec<&'static str> {
-        self.events.iter().filter_map(|e| self.rules.message(e.msg).map(|m| m.name)).collect()
+        self.events
+            .iter()
+            .filter_map(|e| self.rules.message(e.msg).map(|m| m.name))
+            .collect()
     }
 
     /// What `player` could see after the last step (every cell's part, merged).
@@ -384,7 +482,9 @@ impl TestWorld {
                 components: e
                     .parts
                     .iter()
-                    .filter_map(|(c, b)| Some((self.rules.component(*c)?.name.to_string(), b.to_vec())))
+                    .filter_map(|(c, b)| {
+                        Some((self.rules.component(*c)?.name.to_string(), b.to_vec()))
+                    })
                     .collect(),
             })
             .collect()
@@ -399,8 +499,14 @@ impl TestWorld {
 }
 
 fn decode_events<E: Message>(rules: &Rules, events: &[WireEvent]) -> Vec<E> {
-    let Some(id) = rules.message_id::<E>() else { return Vec::new() };
-    events.iter().filter(|e| e.msg == id).filter_map(|e| codec::from_bytes(&e.body)).collect()
+    let Some(id) = rules.message_id::<E>() else {
+        return Vec::new();
+    };
+    events
+        .iter()
+        .filter(|e| e.msg == id)
+        .filter_map(|e| codec::from_bytes(&e.body))
+        .collect()
 }
 
 #[cfg(test)]
@@ -429,22 +535,44 @@ mod tests {
         assert_eq!(hp(&w, bob), 100, "sent this tick");
         w.step();
         let tick = w.tick();
-        assert_eq!(w.entity(bob).unwrap().get::<Log>().unwrap().0, vec![format!("dmg 10 from {alice} on {tick}")]);
+        assert_eq!(
+            w.entity(bob).unwrap().get::<Log>().unwrap().0,
+            vec![format!("dmg 10 from {alice} on {tick}")]
+        );
         assert_eq!(w.events::<Hurt>(), vec![Hurt { id: bob, hp: 90 }]);
         assert_eq!(w.event_names(), vec!["hurt"]);
-        assert_eq!(w.events_seen::<Hurt>(alice), vec![Hurt { id: bob, hp: 90 }], "Alice can see where it happened");
+        assert_eq!(
+            w.events_seen::<Hurt>(alice),
+            vec![Hurt { id: bob, hp: 90 }],
+            "Alice can see where it happened"
+        );
     }
 
     #[test]
     fn area_actions_go_through_the_cells_and_everyone_means_everyone() {
         let (mut w, alice, bob) = two_players();
-        w.command(alice, Command::Blast { x: 10.5, y: 10.5, r: 2.0 });
+        w.command(
+            alice,
+            Command::Blast {
+                x: 10.5,
+                y: 10.5,
+                r: 2.0,
+            },
+        );
         w.run(2);
         assert_eq!(hp(&w, bob), 95);
         assert_eq!(hp(&w, alice), 100, "not the sender");
         w.command(bob, Command::Shout);
         w.run(2);
-        assert!(w.entity(alice).unwrap().get::<Log>().unwrap().0.last().unwrap().ends_with(" all"));
+        assert!(w
+            .entity(alice)
+            .unwrap()
+            .get::<Log>()
+            .unwrap()
+            .0
+            .last()
+            .unwrap()
+            .ends_with(" all"));
     }
 
     #[test]
@@ -462,10 +590,17 @@ mod tests {
         let (mut w, alice, _) = two_players();
         w.command(alice, Command::Spawn);
         w.run(2);
-        let spawned: Vec<_> = w.entities().into_iter().filter(|(_, e)| e.id >= SPAWNED_ID_START).collect();
+        let spawned: Vec<_> = w
+            .entities()
+            .into_iter()
+            .filter(|(_, e)| e.id >= SPAWNED_ID_START)
+            .collect();
         assert_eq!(spawned.len(), 1);
         let (group, e) = spawned[0];
-        assert_eq!((group, e.get::<Health>(), e.player), (1, Some(&Health(7)), false));
+        assert_eq!(
+            (group, e.get::<Health>(), e.player),
+            (1, Some(&Health(7)), false)
+        );
     }
 
     #[test]
@@ -473,10 +608,23 @@ mod tests {
         let (mut w, alice, bob) = two_players();
         w.input(alice, 8, Input { dx: 1.0, dy: 0.0 });
         w.step();
-        assert_eq!(w.entity(alice).unwrap().x, 11.0, "half a tile: from sub-step 8 of 16");
-        let seen: Vec<(EntityId, GroupId, Option<Health>, bool)> =
-            w.view(alice).into_iter().map(|s| (s.id, s.group, s.get::<Health>(), s.has::<Log>())).collect();
-        assert_eq!(seen, vec![(alice, 1, Some(Health(100)), false), (bob, 2, Some(Health(100)), false)]);
+        assert_eq!(
+            w.entity(alice).unwrap().x,
+            11.0,
+            "half a tile: from sub-step 8 of 16"
+        );
+        let seen: Vec<(EntityId, GroupId, Option<Health>, bool)> = w
+            .view(alice)
+            .into_iter()
+            .map(|s| (s.id, s.group, s.get::<Health>(), s.has::<Log>()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                (alice, 1, Some(Health(100)), false),
+                (bob, 2, Some(Health(100)), false)
+            ]
+        );
         w.leave(bob);
         w.step();
         assert!(w.entity(bob).is_none());
@@ -488,6 +636,10 @@ mod tests {
         let mut w = TestWorld::new(test_game::world(), 1, 1);
         let id = w.spawn_in(1, Spawn::new("unit", 5.5, 5.5).with(Health(3)));
         w.step();
-        assert_eq!((hp(&w, id), w.entity(id).unwrap().x), (3, 5.5), "the kind's defaults, with its own health");
+        assert_eq!(
+            (hp(&w, id), w.entity(id).unwrap().x),
+            (3, 5.5),
+            "the kind's defaults, with its own health"
+        );
     }
 }

@@ -24,7 +24,10 @@ use worldmesh_core::time;
 use worldmesh_gateway::GatewayOptions;
 use worldmesh_sim::group;
 use worldmesh_sim::world::World;
-use {worldmesh_gateway as gateway, worldmesh_orchestrator as orchestrator, worldmesh_spatial as spatial};
+use {
+    worldmesh_gateway as gateway, worldmesh_orchestrator as orchestrator,
+    worldmesh_spatial as spatial,
+};
 
 /// The command line every Worldmesh process takes.
 #[derive(Debug, Clone, Parser)]
@@ -89,7 +92,9 @@ pub async fn run(world: World) -> Result<()> {
 /// Like [`run`], with a command line you parsed yourself (say, as part of a bigger CLI).
 pub async fn run_with(world: World, cli: Cli) -> Result<()> {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .try_init();
 
     let tick_ms = time::set_tick_hz(cli.tick_hz);
@@ -102,10 +107,25 @@ pub async fn run_with(world: World, cli: Cli) -> Result<()> {
     match cli.role {
         Role::Group { group_id } => group::run(nats, rules, group_id).await,
         Role::Spatial { spatial_id } => spatial::run(nats, config, spatial_id).await,
-        Role::Gateway { listen, nats_monitor, allow_debug } => {
-            gateway::run(nats, rules, GatewayOptions { listen, nats_monitor, allow_debug }).await
+        Role::Gateway {
+            listen,
+            nats_monitor,
+            allow_debug,
+        } => {
+            gateway::run(
+                nats,
+                rules,
+                GatewayOptions {
+                    listen,
+                    nats_monitor,
+                    allow_debug,
+                },
+            )
+            .await
         }
-        Role::Orchestrator { groups, spatial } => orchestrator::run(nats, config, groups, spatial).await,
+        Role::Orchestrator { groups, spatial } => {
+            orchestrator::run(nats, config, groups, spatial).await
+        }
     }
 }
 
@@ -132,11 +152,24 @@ mod tests {
 
     #[test]
     fn the_command_line_parses_every_role() {
-        let cli = Cli::try_parse_from(["game", "--tick-hz", "20", "orchestrator", "--groups", "3"]).unwrap();
+        let cli = Cli::try_parse_from(["game", "--tick-hz", "20", "orchestrator", "--groups", "3"])
+            .unwrap();
         assert_eq!(cli.tick_hz, 20);
-        assert!(matches!(cli.role, Role::Orchestrator { groups: 3, spatial: 2 }));
+        assert!(matches!(
+            cli.role,
+            Role::Orchestrator {
+                groups: 3,
+                spatial: 2
+            }
+        ));
         let cli = Cli::try_parse_from(["game", "gateway", "--allow-debug"]).unwrap();
-        assert!(matches!(cli.role, Role::Gateway { allow_debug: true, .. }));
+        assert!(matches!(
+            cli.role,
+            Role::Gateway {
+                allow_debug: true,
+                ..
+            }
+        ));
         assert!(Cli::try_parse_from(["game", "group", "--group-id", "7"]).is_ok());
         assert!(Cli::try_parse_from(["game", "spatial"]).is_ok());
         assert!(Cli::try_parse_from(["game"]).is_err(), "a role is required");

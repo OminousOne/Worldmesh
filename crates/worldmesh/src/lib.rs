@@ -49,8 +49,8 @@ pub use config::{ViewShape, WorldConfig};
 pub use gateway::GatewayOptions;
 pub use protocol::{EntityId, GroupId, SPAWNED_ID_START};
 pub use worldmesh_sim::{
-    AnyComponent, Bundle, Category, Component, Entity, Incoming, Me, Message, Nearby, Plugin, Query, Rules, Spawn, Stage,
-    Timed, To, Wire, World,
+    AnyComponent, Bundle, Category, Component, Entity, Incoming, Me, Message, Nearby, Plugin,
+    Query, Rules, Spawn, Stage, Timed, To, Wire, World,
 };
 
 /// `#[derive(Component)]` and `#[derive(Message)]`. Name one with

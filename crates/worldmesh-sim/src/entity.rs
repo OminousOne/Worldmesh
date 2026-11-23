@@ -24,7 +24,14 @@ pub struct Entity {
 
 impl Entity {
     pub(crate) fn new(id: EntityId, x: f32, y: f32, player: bool, kind: u16) -> Self {
-        Self { id, x, y, player, kind, components: Vec::new() }
+        Self {
+            id,
+            x,
+            y,
+            player,
+            kind,
+            components: Vec::new(),
+        }
     }
 
     /// The kind's id (its name: [`Rules::kind_name`], or `Me::kind`).
@@ -33,12 +40,15 @@ impl Entity {
     }
 
     fn index<T: Component>(&self) -> Option<usize> {
-        self.components.iter().position(|c| c.as_any().type_id() == TypeId::of::<T>())
+        self.components
+            .iter()
+            .position(|c| c.as_any().type_id() == TypeId::of::<T>())
     }
 
     /// This entity's `T`, if it has one.
     pub fn get<T: Component>(&self) -> Option<&T> {
-        self.index::<T>().and_then(|i| self.components[i].as_any().downcast_ref())
+        self.index::<T>()
+            .and_then(|i| self.components[i].as_any().downcast_ref())
     }
 
     /// This entity's `T` to change, if it has one.
@@ -52,7 +62,9 @@ impl Entity {
     }
 
     pub(crate) fn has_type(&self, type_id: TypeId) -> bool {
-        self.components.iter().any(|c| c.as_any().type_id() == type_id)
+        self.components
+            .iter()
+            .any(|c| c.as_any().type_id() == type_id)
     }
 
     /// Add a component, replacing one of the same type.
@@ -99,7 +111,12 @@ pub struct Spawn {
 
 impl Spawn {
     pub fn new(kind: &str, x: f32, y: f32) -> Self {
-        Self { kind: kind.to_string(), x, y, with: Bundle::new() }
+        Self {
+            kind: kind.to_string(),
+            x,
+            y,
+            with: Bundle::new(),
+        }
     }
 
     /// Start with this component (on top of the kind's).
@@ -150,7 +167,15 @@ impl Record {
     pub(crate) fn encode(&self, rules: &Rules) -> Option<Vec<u8>> {
         let e = &self.entity;
         let parts = rules.encode(e.components.iter(), false)?;
-        let wire = WireRecord { id: e.id, x: e.x, y: e.y, player: e.player, kind: e.kind, parts, meta: self.meta.clone() };
+        let wire = WireRecord {
+            id: e.id,
+            x: e.x,
+            y: e.y,
+            player: e.player,
+            kind: e.kind,
+            parts,
+            meta: self.meta.clone(),
+        };
         worldmesh_core::codec::to_bytes(&wire)
     }
 
@@ -160,6 +185,9 @@ impl Record {
         for (id, bytes) in &w.parts {
             entity.put(rules.decode_component(*id, bytes)?);
         }
-        Some(Record { entity, meta: w.meta })
+        Some(Record {
+            entity,
+            meta: w.meta,
+        })
     }
 }

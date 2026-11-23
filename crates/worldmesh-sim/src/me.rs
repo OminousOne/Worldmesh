@@ -10,7 +10,10 @@ use std::any::TypeId;
 use std::collections::BTreeMap;
 
 use worldmesh_core::codec;
-use worldmesh_core::protocol::{Address, EntityId, Envelope, EventAt, Facts, GroupId, Kind, NewEntity, Part, Seen, SenseQuery};
+use worldmesh_core::config::WorldConfig;
+use worldmesh_core::protocol::{
+    Address, EntityId, Envelope, EventAt, Facts, GroupId, Kind, NewEntity, Part, Seen, SenseQuery,
+};
 
 use crate::component::{Component, Message, Wire};
 use crate::entity::{Entity, Meta, Record, Spawn};
@@ -62,7 +65,12 @@ pub struct Query {
 impl Query {
     /// Everyone within `r` tiles, with all their visible components.
     pub fn within(r: f32) -> Self {
-        Self { r, nearest: 0, target: None, only: None }
+        Self {
+            r,
+            nearest: 0,
+            target: None,
+            only: None,
+        }
     }
 
     /// Only the `n` nearest (plus the target, if one is set).
@@ -80,7 +88,9 @@ impl Query {
     /// Only this visible component in the answer (call again for more). Answers are the
     /// biggest thing on the bus in a crowd: ask only for what you'll read.
     pub fn with<T: Component>(mut self) -> Self {
-        self.only.get_or_insert_with(Vec::new).push(TypeId::of::<T>());
+        self.only
+            .get_or_insert_with(Vec::new)
+            .push(TypeId::of::<T>());
         self
     }
 }
@@ -129,7 +139,10 @@ impl<'a> Nearby<'a> {
         }
         match self.source {
             Source::Local(e) => e.get::<T>().cloned(),
-            Source::Sensed(parts) => parts.iter().find(|(c, _)| *c == id).and_then(|(_, b)| codec::from_bytes(b)),
+            Source::Sensed(parts) => parts
+                .iter()
+                .find(|(c, _)| *c == id)
+                .and_then(|(_, b)| codec::from_bytes(b)),
         }
     }
 
@@ -201,6 +214,11 @@ impl<'a> Me<'a> {
         self.tick
     }
 
+    /// The world's size, view and input sub-steps.
+    pub fn config(&self) -> WorldConfig {
+        self.rules.config
+    }
+
     /// The Server Entity Group simulating this entity right now.
     pub fn group(&self) -> GroupId {
         self.group
@@ -226,19 +244,36 @@ impl<'a> Me<'a> {
     /// older than its recent trail). Judge an action by where the target was when it was
     /// sent, not where it is when it lands.
     pub fn position_at(&self, tick: u64) -> (f32, f32) {
-        self.meta.trail.iter().rev().find(|(t, ..)| *t <= tick).map(|&(_, x, y)| (x, y)).unwrap_or((self.entity.x, self.entity.y))
+        self.meta
+            .trail
+            .iter()
+            .rev()
+            .find(|(t, ..)| *t <= tick)
+            .map(|&(_, x, y)| (x, y))
+            .unwrap_or((self.entity.x, self.entity.y))
     }
 
     /// This entity's player's inputs due this tick, in order, each with the sub-step it takes
     /// effect at. Empty outside systems, and for entities no player controls.
     pub fn inputs<I: Wire>(&self) -> Vec<Timed<I>> {
-        self.inputs.iter().filter_map(|(sub, bytes)| Some(Timed { sub: *sub, input: codec::from_bytes(bytes)? })).collect()
+        self.inputs
+            .iter()
+            .filter_map(|(sub, bytes)| {
+                Some(Timed {
+                    sub: *sub,
+                    input: codec::from_bytes(bytes)?,
+                })
+            })
+            .collect()
     }
 
     /// Add a component to this entity (replacing one of the same type).
     pub fn insert<T: Component>(&mut self, component: T) {
         if self.rules.component_id::<T>().is_none() {
-            tracing::error!(component = T::NAME, "inserting a component that isn't registered: add world.component::<..>()");
+            tracing::error!(
+                component = T::NAME,
+                "inserting a component that isn't registered: add world.component::<..>()"
+            );
             return;
         }
         self.entity.put(Box::new(component));
@@ -250,9 +285,17 @@ impl<'a> Me<'a> {
     }
 
     fn message_id<M: Message>(&self, category: Category) -> Option<u16> {
-        let id = self.rules.message_id::<M>().filter(|&id| self.rules.message(id).is_some_and(|m| m.category == category));
+        let id = self.rules.message_id::<M>().filter(|&id| {
+            self.rules
+                .message(id)
+                .is_some_and(|m| m.category == category)
+        });
         if id.is_none() {
-            tracing::error!(message = M::NAME, ?category, "not registered as a {category:?}: register it on the world");
+            tracing::error!(
+                message = M::NAME,
+                ?category,
+                "not registered as a {category:?}: register it on the world"
+            );
         }
         id
     }
@@ -261,25 +304,55 @@ impl<'a> Me<'a> {
     /// another machine, or moving between groups), exactly once, stamped with this entity's
     /// id, position and the current tick. Returns its trace (to tag events with).
     pub fn send<A: Message>(&mut self, to: To, action: A) -> u64 {
-        let Some(msg) = self.message_id::<A>(Category::Action) else { return 0 };
-        let Some(body) = codec::to_bytes(&action) else { return 0 };
+        let Some(msg) = self.message_id::<A>(Category::Action) else {
+            return 0;
+        };
+        let Some(body) = codec::to_bytes(&action) else {
+            return 0;
+        };
         self.meta.seq += 1;
-        let from = Facts { id: self.entity.id, group: self.group, x: self.entity.x, y: self.entity.y, tick: self.tick };
-        let trace = if self.trace != 0 { self.trace } else { codec::trace_id(self.entity.id, self.meta.seq) };
+        let from = Facts {
+            id: self.entity.id,
+            group: self.group,
+            x: self.entity.x,
+            y: self.entity.y,
+            tick: self.tick,
+        };
+        let trace = if self.trace != 0 {
+            self.trace
+        } else {
+            codec::trace_id(self.entity.id, self.meta.seq)
+        };
         let to = match to {
             To::Entity(id) => Address::Entity { id },
             To::Area { x, y, r } => Address::Area { x, y, r },
             To::Everyone => Address::Everyone,
         };
-        let env = Envelope { to, from, via: self.group, seq: self.meta.seq, trace, hops: 0, kind: Kind::Action { msg, body } };
+        let env = Envelope {
+            to,
+            from,
+            via: self.group,
+            seq: self.meta.seq,
+            trace,
+            hops: 0,
+            kind: Kind::Action { msg, body },
+        };
         self.requests.envelopes.push(env);
         trace
     }
 
     fn push_event<E: Message>(&mut self, x: f32, y: f32, event: E, involves: Vec<EntityId>) {
-        let Some(msg) = self.message_id::<E>(Category::Event) else { return };
+        let Some(msg) = self.message_id::<E>(Category::Event) else {
+            return;
+        };
         if let Some(body) = codec::to_bytes(&event) {
-            self.requests.events.push(EventAt { x, y, msg, body, involves });
+            self.requests.events.push(EventAt {
+                x,
+                y,
+                msg,
+                body,
+                involves,
+            });
         }
     }
 
@@ -320,7 +393,15 @@ impl<'a> Me<'a> {
                 .collect()
         });
         let (id, x, y) = (self.entity.id, self.entity.x, self.entity.y);
-        self.requests.queries.push(SenseQuery { id, x, y, r: q.r, nearest: q.nearest, target: q.target, only });
+        self.requests.queries.push(SenseQuery {
+            id,
+            x,
+            y,
+            r: q.r,
+            nearest: q.nearest,
+            target: q.target,
+            only,
+        });
     }
 
     fn nearby_local(&self, e: &'a Entity) -> Nearby<'a> {
@@ -360,14 +441,20 @@ impl<'a> Me<'a> {
     /// Other groups' entities from the latest answer to [`Me::query`] (dropped after a second).
     pub fn sensed(&self) -> impl Iterator<Item = Nearby<'a>> + '_ {
         let sensed: &'a [Seen] = self.sensed;
-        sensed.iter().filter(move |s| !self.others.contains_key(&s.id) && s.id != self.entity.id).map(move |s| self.nearby_sensed(s))
+        sensed
+            .iter()
+            .filter(move |s| !self.others.contains_key(&s.id) && s.id != self.entity.id)
+            .map(move |s| self.nearby_sensed(s))
     }
 
     /// Every entity within `r` tiles that this entity knows of: its own group's (exact) and
     /// other groups' from the latest answer.
     pub fn nearby(&self, r: f32) -> Vec<Nearby<'a>> {
         let (x, y) = (self.entity.x, self.entity.y);
-        self.local().chain(self.sensed()).filter(|n| n.distance_to(x, y) <= r).collect()
+        self.local()
+            .chain(self.sensed())
+            .filter(|n| n.distance_to(x, y) <= r)
+            .collect()
     }
 
     /// What this entity knows of entity `id`: exact if it's in this group, otherwise from the
@@ -378,14 +465,24 @@ impl<'a> Me<'a> {
             return Some(self.nearby_local(&r.entity));
         }
         let sensed: &'a [Seen] = self.sensed;
-        sensed.iter().find(|s| s.id == id).map(|s| self.nearby_sensed(s))
+        sensed
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| self.nearby_sensed(s))
     }
 
     /// Create an entity. The orchestrator gives it an id and a group; it starts ticking within
     /// a tick or two.
     pub fn spawn(&mut self, spawn: Spawn) {
         if let Some((kind, parts)) = self.rules.encode_spawn(&spawn) {
-            self.requests.spawns.push(NewEntity { id: 0, x: spawn.x, y: spawn.y, player: false, kind, parts });
+            self.requests.spawns.push(NewEntity {
+                id: 0,
+                x: spawn.x,
+                y: spawn.y,
+                player: false,
+                kind,
+                parts,
+            });
         }
     }
 

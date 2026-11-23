@@ -9,12 +9,16 @@ use tracing::warn;
 
 /// Encode a game value.
 pub fn to_bytes<T: Serialize>(value: &T) -> Option<Vec<u8>> {
-    rmp_serde::to_vec_named(value).map_err(|err| warn!(%err, "encoding a game value failed")).ok()
+    rmp_serde::to_vec_named(value)
+        .map_err(|err| warn!(%err, "encoding a game value failed"))
+        .ok()
 }
 
 /// Decode a game value (None, with a warning, if it doesn't match the type).
 pub fn from_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Option<T> {
-    rmp_serde::from_slice(bytes).map_err(|err| warn!(%err, "decoding a game value failed")).ok()
+    rmp_serde::from_slice(bytes)
+        .map_err(|err| warn!(%err, "decoding a game value failed"))
+        .ok()
 }
 
 /// A game value from a browser (JSON) as bytes, without knowing its type.
@@ -60,18 +64,34 @@ mod tests {
 
     #[test]
     fn game_values_round_trip_and_read_as_json() {
-        let ev = Event::Hit { target: 7, damage: 12 };
+        let ev = Event::Hit {
+            target: 7,
+            damage: 12,
+        };
         let bytes = to_bytes(&ev).unwrap();
         assert_eq!(from_bytes::<Event>(&bytes), Some(ev));
-        assert_eq!(bytes_to_json(&bytes), serde_json::json!({"e": "hit", "target": 7, "damage": 12}));
-        assert_eq!(bytes_to_json(&to_bytes(&Event::Miss).unwrap()), serde_json::json!({"e": "miss"}));
+        assert_eq!(
+            bytes_to_json(&bytes),
+            serde_json::json!({"e": "hit", "target": 7, "damage": 12})
+        );
+        assert_eq!(
+            bytes_to_json(&to_bytes(&Event::Miss).unwrap()),
+            serde_json::json!({"e": "miss"})
+        );
     }
 
     #[test]
     fn json_from_a_browser_decodes_as_the_game_type() {
         let json = serde_json::json!({"dx": 0.5, "dy": -1});
         let bytes = json_to_bytes(&json).unwrap();
-        assert_eq!(from_bytes::<Input>(&bytes), Some(Input { dx: 0.5, dy: -1.0 }));
-        assert_eq!(from_bytes::<Event>(&bytes), None, "the wrong type is refused, not misread");
+        assert_eq!(
+            from_bytes::<Input>(&bytes),
+            Some(Input { dx: 0.5, dy: -1.0 })
+        );
+        assert_eq!(
+            from_bytes::<Event>(&bytes),
+            None,
+            "the wrong type is refused, not misread"
+        );
     }
 }

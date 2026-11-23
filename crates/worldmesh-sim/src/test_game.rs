@@ -73,7 +73,9 @@ const SUB: f32 = 16.0;
 /// One tile per tick in the held direction, changing direction at each input's sub-step.
 fn walk(me: &mut Me<'_>) {
     let inputs = me.inputs::<Input>();
-    let Some(mut dir) = me.get::<Walker>().map(|w| w.dir) else { return };
+    let Some(mut dir) = me.get::<Walker>().map(|w| w.dir) else {
+        return;
+    };
     let mut from = 0.0;
     for t in inputs {
         let at = f32::from(t.sub);
@@ -133,7 +135,16 @@ fn damage(me: &mut Me<'_>, &Damage(n): &Damage, from: &Incoming) {
 }
 
 pub fn config() -> WorldConfig {
-    WorldConfig { width: 64, height: 64, chunk_size: 8, view: ViewShape::Rect { half_w: 20.0, half_h: 12.0 }, input_substeps: 16 }
+    WorldConfig {
+        width: 64,
+        height: 64,
+        chunk_size: 8,
+        view: ViewShape::Rect {
+            half_w: 20.0,
+            half_h: 12.0,
+        },
+        input_substeps: 16,
+    }
 }
 
 /// The test game's world.
@@ -147,7 +158,13 @@ pub fn world() -> World {
         .action(damage)
         .event::<Hurt>()
         .system_for::<Walker>(Stage::Update, walk)
-        .kind("unit", Bundle::new().with(Health(100)).with(Walker::default()).with(Log::default()))
+        .kind(
+            "unit",
+            Bundle::new()
+                .with(Health(100))
+                .with(Walker::default())
+                .with(Log::default()),
+        )
         .join(|_player| Spawn::new("unit", 10.5, 10.5));
     w
 }

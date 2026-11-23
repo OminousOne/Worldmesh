@@ -69,7 +69,12 @@ pub fn random_process_id(spatial: bool) -> u32 {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hasher};
     let mut h = RandomState::new().build_hasher();
-    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
     let raw = (h.finish() as u32 % 0x7ffe) + 1; // 1..=0x7ffe, never 0
     if spatial {
         raw | SPATIAL_ID_BIT

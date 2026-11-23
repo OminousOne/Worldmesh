@@ -20,7 +20,10 @@ struct UseAbility {
 #[test]
 fn names_default_to_snake_case_and_can_be_chosen() {
     assert_eq!(<Health as worldmesh::Component>::NAME, "health");
-    assert_eq!(<Cooldowns as worldmesh::Component>::NAME, "combat.cooldowns");
+    assert_eq!(
+        <Cooldowns as worldmesh::Component>::NAME,
+        "combat.cooldowns"
+    );
     assert_eq!(<UseAbility as worldmesh::Message>::NAME, "use_ability");
 }
 
@@ -36,7 +39,10 @@ fn derived_types_register_and_show_up_in_the_schema() {
             }
         })
         .system(Stage::Update, |_| {})
-        .kind("hero", Bundle::new().with(Health(100)).with(Cooldowns::default()))
+        .kind(
+            "hero",
+            Bundle::new().with(Health(100)).with(Cooldowns::default()),
+        )
         .join(|_| Spawn::new("hero", 1.0, 1.0));
     let schema = world.build().schema();
     assert_eq!(schema.components, vec!["health", "combat.cooldowns"]);

@@ -27,15 +27,18 @@ use futures::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, mpsc, Notify};
 use tracing::{debug, info, warn};
 
+use crate::snapshot::Encoder;
 use worldmesh_core::config::WorldConfig;
-use worldmesh_sim::world::Rules;
 use worldmesh_core::protocol::{
     Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, GroupCommand, GroupCommandKind,
-    JoinRequest, Kind, ProcessStats, SenseDebug, ServerMsg, SnapshotEntity, SpatialViews, StreamKind, StreamMsg, ViewEntity,
-    Viewer, Viewers, WireEvent,
+    JoinRequest, Kind, ProcessStats, SenseDebug, ServerMsg, SnapshotEntity, SpatialViews,
+    StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
 };
-use crate::snapshot::Encoder;
-use worldmesh_core::subjects::{entity_subject, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, STATS, VIEWERS, VIEWS};
+use worldmesh_core::subjects::{
+    entity_subject, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, STATS,
+    VIEWERS, VIEWS,
+};
+use worldmesh_sim::world::Rules;
 pub mod snapshot;
 
 use worldmesh_core::views::{from_player, merge_view};
@@ -63,7 +66,11 @@ pub struct GatewayOptions {
 
 impl Default for GatewayOptions {
     fn default() -> Self {
-        Self { listen: "0.0.0.0:8080".into(), nats_monitor: None, allow_debug: false }
+        Self {
+            listen: "0.0.0.0:8080".into(),
+            nats_monitor: None,
+            allow_debug: false,
+        }
     }
 }
 
@@ -94,7 +101,11 @@ struct AppState {
 }
 
 /// A gateway process.
-pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOptions) -> Result<()> {
+pub async fn run(
+    nats: async_nats::Client,
+    rules: Arc<Rules>,
+    options: GatewayOptions,
+) -> Result<()> {
     let config = rules.config;
     let (out, _) = broadcast::channel::<Bytes>(64);
     let ownership = Arc::new(Mutex::new(None::<Bytes>));
@@ -139,7 +150,9 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOp
             while let Some(assignment) = assignments.recv().await {
                 bus::set_binary(assignment.binary_bus);
                 *in_use.lock().unwrap() = assignment.spatial.clone();
-                let Ok(encoded) = serde_json::to_vec(&ServerMsg::Ownership(assignment)) else { continue };
+                let Ok(encoded) = serde_json::to_vec(&ServerMsg::Ownership(assignment)) else {
+                    continue;
+                };
                 let encoded = Bytes::from(encoded);
                 let mut cached = ownership.lock().unwrap();
                 if cached.as_ref() != Some(&encoded) {
@@ -187,7 +200,13 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOp
     // every reporting cell has sent its views for this tick (or after MERGE_TIMEOUT), put each
     // player's snapshot together and send it.
     {
-        let (latest, clients, reports, in_use, nats) = (latest.clone(), clients.clone(), reports.clone(), in_use.clone(), nats.clone());
+        let (latest, clients, reports, in_use, nats) = (
+            latest.clone(),
+            clients.clone(),
+            reports.clone(),
+            in_use.clone(),
+            nats.clone(),
+        );
         let rules = rules.clone();
         tokio::spawn(async move {
             // Last tick each cell's events were forwarded for, so none goes out twice.
@@ -195,27 +214,54 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOp
             loop {
                 tokio::time::sleep(time::until_next_tick()).await;
                 let tick = time::current_tick();
-                let viewers: Vec<Viewer> =
-                    clients.lock().unwrap().iter().map(|(&player, c)| Viewer { player, x: c.at.0, y: c.at.1 }).collect();
-                bus::publish(&nats, VIEWERS.to_string(), &Viewers { tick, viewers: viewers.clone() }).await;
+                let viewers: Vec<Viewer> = clients
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(&player, c)| Viewer {
+                        player,
+                        x: c.at.0,
+                        y: c.at.1,
+                    })
+                    .collect();
+                bus::publish(
+                    &nats,
+                    VIEWERS.to_string(),
+                    &Viewers {
+                        tick,
+                        viewers: viewers.clone(),
+                    },
+                )
+                .await;
                 let mut own_streams: Vec<StreamMsg> = in_use
                     .lock()
                     .unwrap()
                     .iter()
-                    .map(|&s| StreamMsg { from: 0, to: s, kind: StreamKind::Viewers, n: viewers.len() as u32 })
+                    .map(|&s| StreamMsg {
+                        from: 0,
+                        to: s,
+                        kind: StreamKind::Viewers,
+                        n: viewers.len() as u32,
+                    })
                     .collect();
 
                 let deadline = tokio::time::Instant::now() + MERGE_TIMEOUT;
                 loop {
                     let ready = {
                         let latest = latest.lock().unwrap();
-                        let recent: Vec<&SpatialViews> = latest.values().filter(|v| v.tick + time::ticks_in(1000) >= tick).collect();
+                        let recent: Vec<&SpatialViews> = latest
+                            .values()
+                            .filter(|v| v.tick + time::ticks_in(1000) >= tick)
+                            .collect();
                         !recent.is_empty() && recent.iter().all(|v| v.tick >= tick)
                     };
                     if ready {
                         break;
                     }
-                    if tokio::time::timeout_at(deadline, arrived.notified()).await.is_err() {
+                    if tokio::time::timeout_at(deadline, arrived.notified())
+                        .await
+                        .is_err()
+                    {
                         let behind: Vec<String> = latest
                             .lock()
                             .unwrap()
@@ -238,7 +284,11 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOp
                 let fresh: Vec<SpatialViews> = {
                     let mut latest = latest.lock().unwrap();
                     latest.retain(|_, v| v.tick + time::ticks_in(2000) >= tick); // forget cells silent for 2 s
-                    latest.values().filter(|v| v.tick + 2 >= tick).cloned().collect()
+                    latest
+                        .values()
+                        .filter(|v| v.tick + 2 >= tick)
+                        .cloned()
+                        .collect()
                 };
                 // Events are forwarded once per cell update, never twice.
                 let new_events: BTreeSet<u32> = fresh
@@ -259,10 +309,15 @@ pub async fn run(nats: async_nats::Client, rules: Arc<Rules>, options: GatewayOp
                         client.at = (me.x, me.y);
                     }
                     // Debug traffic only for players looking at it.
-                    let (senses, bus, streams) =
-                        if client.debug { (&senses[..], &bus[..], &streams[..]) } else { (&[][..], &[][..], &[][..]) };
+                    let (senses, bus, streams) = if client.debug {
+                        (&senses[..], &bus[..], &streams[..])
+                    } else {
+                        (&[][..], &[][..], &[][..])
+                    };
                     let encoded = if client.compact {
-                        client.encoder.encode(player, tick, &entities, &events, senses, bus, streams)
+                        client
+                            .encoder
+                            .encode(player, tick, &entities, &events, senses, bus, streams)
                     } else {
                         json_snapshot(&rules, tick, &entities, &events, senses, bus, streams)
                     };
@@ -318,7 +373,12 @@ fn json_snapshot(
             view: e
                 .parts
                 .iter()
-                .filter_map(|(c, bytes)| Some((rules.component(*c)?.name.to_string(), codec::bytes_to_json(bytes))))
+                .filter_map(|(c, bytes)| {
+                    Some((
+                        rules.component(*c)?.name.to_string(),
+                        codec::bytes_to_json(bytes),
+                    ))
+                })
                 .collect::<serde_json::Map<_, _>>()
                 .into(),
         })
@@ -327,7 +387,14 @@ fn json_snapshot(
         .iter()
         .filter_map(|e| Some(serde_json::json!({ "name": rules.message(e.msg)?.name, "data": codec::bytes_to_json(&e.body) })))
         .collect();
-    let msg = ServerMsg::Snapshot { tick, entities, events, senses: senses.to_vec(), bus: bus.to_vec(), streams: streams.to_vec() };
+    let msg = ServerMsg::Snapshot {
+        tick,
+        entities,
+        events,
+        senses: senses.to_vec(),
+        bus: bus.to_vec(),
+        streams: streams.to_vec(),
+    };
     serde_json::to_vec(&msg).unwrap_or_default()
 }
 
@@ -340,7 +407,13 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 fn join_request(rules: &Rules, id: EntityId) -> Option<JoinRequest> {
     let spawn = rules.join(id);
     let (kind, parts) = rules.encode_spawn(&spawn)?;
-    Some(JoinRequest { id, x: spawn.x, y: spawn.y, kind, parts })
+    Some(JoinRequest {
+        id,
+        x: spawn.x,
+        y: spawn.y,
+        kind,
+        parts,
+    })
 }
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
@@ -355,7 +428,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         game: state.rules.welcome().clone(),
         schema: state.rules.schema(),
     };
-    let Ok(welcome) = serde_json::to_vec(&welcome) else { return };
+    let Ok(welcome) = serde_json::to_vec(&welcome) else {
+        return;
+    };
     stats::WS_OUT.add(welcome.len());
     if sender.send(Message::Binary(welcome.into())).await.is_err() {
         return;
@@ -441,11 +516,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     state.clients.lock().unwrap().remove(&id);
     stats::PLAYERS.fetch_sub(1, Ordering::Relaxed);
-    let leave = GroupCommand { to: None, kind: GroupCommandKind::Leave { id } };
+    let leave = GroupCommand {
+        to: None,
+        kind: GroupCommandKind::Leave { id },
+    };
     bus::publish(&state.nats, GROUP_COMMANDS.to_string(), &leave).await;
     info!(id, "player disconnected");
 }
-
 
 /// When an input for (`tick`, `sub`) should take effect. Groups have already simulated tick
 /// `now`; `now + 1` is the earliest tick an input can still change. Tick 0 (or anything
@@ -462,7 +539,8 @@ fn schedule_input(tick: u64, sub: u8, now: u64) -> (u64, u8) {
 /// tick `tick`'s movement, which covers the time from tick - 1 to tick.
 fn early_ms(tick: u64, sub: u8, substeps: u8, now_ms: u64) -> i64 {
     let tick_ms = time::tick_ms();
-    let change_ms = tick.saturating_sub(1) * tick_ms + u64::from(sub) * tick_ms / u64::from(substeps.max(1));
+    let change_ms =
+        tick.saturating_sub(1) * tick_ms + u64::from(sub) * tick_ms / u64::from(substeps.max(1));
     change_ms as i64 - now_ms as i64
 }
 
@@ -481,11 +559,27 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
             let sub = sub.min(substeps - 1);
             let now_ms = time::world_ms();
             let (at_tick, at_sub) = schedule_input(tick, sub, now_ms / time::tick_ms());
-            let env = from_player(id, Kind::Input { at_tick, sub: at_sub, input }, false);
+            let env = from_player(
+                id,
+                Kind::Input {
+                    at_tick,
+                    sub: at_sub,
+                    input,
+                },
+                false,
+            );
             bus::publish(&state.nats, entity_subject(id), &env).await;
             // Tick 0 ("as soon as possible") has no moment to be early for.
-            let early = if tick == 0 { 0 } else { early_ms(tick, sub, substeps, now_ms) };
-            Some(ServerMsg::InputAck { tick, sub, early_ms: early })
+            let early = if tick == 0 {
+                0
+            } else {
+                early_ms(tick, sub, substeps, now_ms)
+            };
+            Some(ServerMsg::InputAck {
+                tick,
+                sub,
+                early_ms: early,
+            })
         }
         Ok(ClientMsg::Command { name, command }) => {
             // Addressed to the player's own entity: the bus delivers it to whichever group
@@ -510,13 +604,33 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
             }
             None
         }
-        Ok(ClientMsg::Debug { set_groups, set_spatial, regroup, binary_bus, set_lag }) => {
+        Ok(ClientMsg::Debug {
+            set_groups,
+            set_spatial,
+            regroup,
+            binary_bus,
+            set_lag,
+        }) => {
             if !state.options.allow_debug {
                 warn!(id, "debug commands are turned off on this gateway");
                 return None;
             }
-            info!(id, ?set_groups, ?set_spatial, ?regroup, ?binary_bus, ?set_lag, "debug command");
-            let cmd = DebugCommand { set_groups, set_spatial, regroup: regroup == Some(true), binary_bus, set_lag };
+            info!(
+                id,
+                ?set_groups,
+                ?set_spatial,
+                ?regroup,
+                ?binary_bus,
+                ?set_lag,
+                "debug command"
+            );
+            let cmd = DebugCommand {
+                set_groups,
+                set_spatial,
+                regroup: regroup == Some(true),
+                binary_bus,
+                set_lag,
+            };
             bus::publish(&state.nats, DEBUG_COMMANDS.to_string(), &cmd).await;
             None
         }
@@ -536,28 +650,81 @@ mod tests {
     use worldmesh_sim::test_game::{self, Health, Hurt};
 
     fn entity(id: u32, x: f32, spatial: u32) -> ViewEntity {
-        ViewEntity { id, x, y: 1.0, group: 1, spatial, player: true, kind: 0, parts: Vec::new() }
+        ViewEntity {
+            id,
+            x,
+            y: 1.0,
+            group: 1,
+            spatial,
+            player: true,
+            kind: 0,
+            parts: Vec::new(),
+        }
     }
 
-    fn cell(spatial: u32, tick: u64, player: u32, entities: Vec<ViewEntity>, events: Vec<&[u8]>) -> SpatialViews {
-        let events = events.into_iter().map(|e| WireEvent { msg: 0, body: e.to_vec() }).collect();
-        SpatialViews { spatial, tick, views: vec![CellView { player, entities, events, senses: Vec::new() }] }
+    fn cell(
+        spatial: u32,
+        tick: u64,
+        player: u32,
+        entities: Vec<ViewEntity>,
+        events: Vec<&[u8]>,
+    ) -> SpatialViews {
+        let events = events
+            .into_iter()
+            .map(|e| WireEvent {
+                msg: 0,
+                body: e.to_vec(),
+            })
+            .collect();
+        SpatialViews {
+            spatial,
+            tick,
+            views: vec![CellView {
+                player,
+                entities,
+                events,
+                senses: Vec::new(),
+            }],
+        }
     }
 
     #[test]
     fn a_view_merges_cells_keeping_the_newest_copy_of_each_entity() {
         let fresh = vec![
-            cell(0x8001, 100, 7, vec![entity(1, 10.0, 0x8001), entity(2, 31.9, 0x8001)], vec![b"\xa1a"]),
-            cell(0x8002, 101, 7, vec![entity(2, 32.1, 0x8002), entity(3, 40.0, 0x8002)], vec![b"\xa1b"]),
+            cell(
+                0x8001,
+                100,
+                7,
+                vec![entity(1, 10.0, 0x8001), entity(2, 31.9, 0x8001)],
+                vec![b"\xa1a"],
+            ),
+            cell(
+                0x8002,
+                101,
+                7,
+                vec![entity(2, 32.1, 0x8002), entity(3, 40.0, 0x8002)],
+                vec![b"\xa1b"],
+            ),
         ];
         let (entities, events, _) = merge_view(7, &fresh, &[0x8001, 0x8002].into());
         let got: Vec<(u32, f32)> = entities.iter().map(|e| (e.id, e.x)).collect();
-        assert_eq!(got, vec![(1, 10.0), (2, 32.1), (3, 40.0)], "2 crossed over: the newer report wins");
+        assert_eq!(
+            got,
+            vec![(1, 10.0), (2, 32.1), (3, 40.0)],
+            "2 crossed over: the newer report wins"
+        );
         assert_eq!(events.len(), 2);
         let (_, events, _) = merge_view(7, &fresh, &[0x8002].into());
-        assert_eq!(events.len(), 1, "a cell's events go out once, with its first update");
+        assert_eq!(
+            events.len(),
+            1,
+            "a cell's events go out once, with its first update"
+        );
         let (entities, _, _) = merge_view(8, &fresh, &BTreeSet::new());
-        assert!(entities.is_empty(), "nothing for a player no cell sent a view for");
+        assert!(
+            entities.is_empty(),
+            "nothing for a player no cell sent a view for"
+        );
     }
 
     #[test]
@@ -566,7 +733,10 @@ mod tests {
         let health = rules.component_id::<Health>().unwrap();
         let mut e = entity(4, 2.0, 0x8001);
         e.parts = vec![(health, ByteBuf::from(codec::to_bytes(&Health(90)).unwrap()))];
-        let event = WireEvent { msg: rules.message_id::<Hurt>().unwrap(), body: codec::to_bytes(&Hurt { id: 4, hp: 90 }).unwrap() };
+        let event = WireEvent {
+            msg: rules.message_id::<Hurt>().unwrap(),
+            body: codec::to_bytes(&Hurt { id: 4, hp: 90 }).unwrap(),
+        };
         let bytes = json_snapshot(&rules, 55, &[e], &[event], &[], &[], &[]);
         let v: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["t"], "snapshot");
@@ -579,30 +749,62 @@ mod tests {
     #[test]
     fn player_values_are_checked_against_the_worlds_types() {
         let rules = test_game::rules();
-        let (msg, body) = rules.command_from_json("command", serde_json::json!({ "Hit": { "target": 2 } })).unwrap();
+        let (msg, body) = rules
+            .command_from_json("command", serde_json::json!({ "Hit": { "target": 2 } }))
+            .unwrap();
         assert_eq!(rules.message(msg).unwrap().name, "command");
-        assert!(matches!(codec::from_bytes::<test_game::Command>(&body), Some(test_game::Command::Hit { target: 2 })));
-        assert!(rules.command_from_json("command", serde_json::json!({ "Teleport": {} })).is_err());
-        assert!(rules.command_from_json("dance", serde_json::json!(null)).is_err(), "not a command");
-        assert!(rules.command_from_json("damage", serde_json::json!(5)).is_err(), "an action, not a command");
-        assert!(rules.input_from_json(serde_json::json!({ "dx": 1.0, "dy": 0.0 })).is_ok());
-        assert!(rules.input_from_json(serde_json::json!({ "dx": "east" })).is_err());
+        assert!(matches!(
+            codec::from_bytes::<test_game::Command>(&body),
+            Some(test_game::Command::Hit { target: 2 })
+        ));
+        assert!(rules
+            .command_from_json("command", serde_json::json!({ "Teleport": {} }))
+            .is_err());
+        assert!(
+            rules
+                .command_from_json("dance", serde_json::json!(null))
+                .is_err(),
+            "not a command"
+        );
+        assert!(
+            rules
+                .command_from_json("damage", serde_json::json!(5))
+                .is_err(),
+            "an action, not a command"
+        );
+        assert!(rules
+            .input_from_json(serde_json::json!({ "dx": 1.0, "dy": 0.0 }))
+            .is_ok());
+        assert!(rules
+            .input_from_json(serde_json::json!({ "dx": "east" }))
+            .is_err());
     }
 
     #[test]
     fn a_join_uses_the_worlds_join_function() {
         let rules = test_game::rules();
         let join = join_request(&rules, 3).unwrap();
-        assert_eq!((join.id, join.x, join.y, rules.kind_name(join.kind)), (3, 10.5, 10.5, "unit"));
+        assert_eq!(
+            (join.id, join.x, join.y, rules.kind_name(join.kind)),
+            (3, 10.5, 10.5, "unit")
+        );
     }
 
     #[test]
     fn inputs_are_scheduled_no_earlier_than_the_next_tick_and_not_far_ahead() {
         worldmesh_core::time::set_tick_hz(10);
         assert_eq!(schedule_input(0, 5, 1000), (1001, 0), "as soon as possible");
-        assert_eq!(schedule_input(999, 5, 1000), (1001, 0), "too late for its tick");
+        assert_eq!(
+            schedule_input(999, 5, 1000),
+            (1001, 0),
+            "too late for its tick"
+        );
         assert_eq!(schedule_input(1003, 5, 1000), (1003, 5));
-        assert_eq!(schedule_input(9999, 5, 1000), (1050, 5), "at most 5 s ahead");
+        assert_eq!(
+            schedule_input(9999, 5, 1000),
+            (1050, 5),
+            "at most 5 s ahead"
+        );
         // Tick 1001's movement covers 100.0 s to 100.1 s; sub 8 of 16 is 100.05 s.
         assert_eq!(early_ms(1001, 8, 16, 100_000), 50);
         assert_eq!(early_ms(1001, 0, 16, 100_020), -20);

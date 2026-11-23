@@ -89,14 +89,26 @@ impl Bundle {
 
     /// Add a component (replacing one of the same type already in the bundle).
     pub fn with<T: Component>(mut self, component: T) -> Self {
-        self.items.retain(|c| c.as_any().type_id() != std::any::TypeId::of::<T>());
+        self.items
+            .retain(|c| c.as_any().type_id() != std::any::TypeId::of::<T>());
         self.items.push(Box::new(component));
         self
+    }
+
+    /// Add every component of `other` (replacing ones of the same type).
+    pub(crate) fn merge(&mut self, other: Bundle) {
+        for item in other.items {
+            let type_id = item.as_any().type_id();
+            self.items.retain(|c| c.as_any().type_id() != type_id);
+            self.items.push(item);
+        }
     }
 }
 
 impl std::fmt::Debug for Bundle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.items.iter().map(|c| c.type_name())).finish()
+        f.debug_list()
+            .entries(self.items.iter().map(|c| c.type_name()))
+            .finish()
     }
 }
