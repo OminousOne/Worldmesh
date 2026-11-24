@@ -18,3 +18,29 @@ const region = regions[id.split('/')[0]];
     color: var(--sl-color-white);
   }
 </style>
+
+<script>
+  // "On this page" marks the section whose heading has reached the top of the screen. A short
+  // last section never gets that far, so at the bottom of the page, mark the last one. Run
+  // again just after a scroll, so Starlight's own update (which comes later) doesn't undo it.
+  type Toc = HTMLElement & { current: HTMLAnchorElement };
+  const atBottom = () =>
+    window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+  function markLast() {
+    if (!atBottom()) return;
+    for (const toc of document.querySelectorAll<Toc>('starlight-toc, mobile-starlight-toc')) {
+      const links = toc.querySelectorAll<HTMLAnchorElement>('a');
+      const last = links[links.length - 1];
+      if (last && 'current' in toc) toc.current = last;
+    }
+  }
+  let later = 0;
+  function onScroll() {
+    markLast();
+    clearTimeout(later);
+    later = window.setTimeout(markLast, 120);
+  }
+  addEventListener('scroll', onScroll, { passive: true });
+  addEventListener('resize', onScroll);
+  onScroll();
+</script>
