@@ -144,9 +144,11 @@ struct Client {
     at: (f32, f32),
     /// Whether their own entity was in their last view.
     present: bool,
-    /// Optimized snapshots (binary, only what changed), and whether to include debug traffic.
+    /// Optimized snapshots (binary, only what changed), whether to include debug traffic, and
+    /// whether to send every process's numbers once a second (for the debug panel).
     compact: bool,
     debug: bool,
+    stats: bool,
     encoder: Encoder,
 }
 
@@ -156,7 +158,7 @@ struct AppState {
     rules: Arc<Rules>,
     config: WorldConfig,
     options: GatewayOptions,
-    /// Encoded messages for every player (assignment changes and stats).
+    /// Encoded messages for every player (assignment changes).
     out: broadcast::Sender<Bytes>,
     /// This gateway's id: random, so any number can run.
     gateway: u32,
@@ -236,17 +238,34 @@ pub async fn run(
         });
     }
 
-    // Debug reports from every process, collected until the next merged tick.
+    // Debug reports from every process, collected until the next merged tick. Only while a
+    // player here has debug traffic on: with many gateways, they'd otherwise all get every
+    // process's report every tick.
     let reports: Arc<Mutex<Vec<DebugReport>>> = Arc::default();
-    let mut debug_in = bus::subscribe::<DebugReport>(&nats, DEBUG_REPORTS).await?;
     {
-        let reports = reports.clone();
+        let (reports, clients, nats) = (reports.clone(), clients.clone(), nats.clone());
         tokio::spawn(async move {
-            while let Some(r) = debug_in.recv().await {
-                let mut list = reports.lock().unwrap();
-                list.push(r);
-                if list.len() > 2000 {
-                    list.drain(..1000); // nobody is collecting (no players): don't grow forever
+            let mut feed: Option<mpsc::UnboundedReceiver<DebugReport>> = None;
+            let mut check = tokio::time::interval(Duration::from_millis(500));
+            loop {
+                tokio::select! {
+                    _ = check.tick() => {
+                        let wanted = clients.lock().unwrap().values().any(|c| c.debug);
+                        feed = follow(&nats, DEBUG_REPORTS, wanted, feed).await;
+                        if feed.is_none() {
+                            reports.lock().unwrap().clear();
+                        }
+                    }
+                    r = next(&mut feed) => match r {
+                        Some(r) => {
+                            let mut list = reports.lock().unwrap();
+                            list.push(r);
+                            if list.len() > 2000 {
+                                list.drain(..1000); // no ticks merged lately: don't grow forever
+                            }
+                        }
+                        None => feed = None,
+                    },
                 }
             }
         });
@@ -274,22 +293,32 @@ pub async fn run(
         });
     }
 
-    // Every process's latest stats; once a second, add NATS's own and send them all to players.
+    // Every process's latest stats; once a second, add NATS's own and send them to the players
+    // who asked (the debug panel does). Only listened to while someone here wants them.
     stats::spawn_reporter(nats.clone(), "gateway", gateway_id);
-    let mut stats_in = bus::subscribe::<ProcessStats>(&nats, STATS).await?;
     {
-        let out = out.clone();
+        let (clients, nats) = (clients.clone(), nats.clone());
         let nats_monitor = options.nats_monitor.clone();
         tokio::spawn(async move {
+            let mut feed: Option<mpsc::UnboundedReceiver<ProcessStats>> = None;
             let mut latest: BTreeMap<(String, u32), (Instant, ProcessStats)> = BTreeMap::new();
             let mut nats_monitor = nats_monitor.map(stats::NatsMonitor::new);
             let mut every_second = tokio::time::interval(Duration::from_secs(1));
             loop {
                 tokio::select! {
-                    Some(s) = stats_in.recv() => {
-                        latest.insert((s.role.clone(), s.id), (Instant::now(), s));
-                    }
+                    s = next(&mut feed) => match s {
+                        Some(s) => {
+                            latest.insert((s.role.clone(), s.id), (Instant::now(), s));
+                        }
+                        None => feed = None,
+                    },
                     _ = every_second.tick() => {
+                        let wanted = clients.lock().unwrap().values().any(|c| c.stats);
+                        feed = follow(&nats, STATS, wanted, feed).await;
+                        if feed.is_none() {
+                            latest.clear();
+                            continue;
+                        }
                         latest.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(3));
                         let mut processes: Vec<ProcessStats> = latest.values().map(|(_, s)| s.clone()).collect();
                         if let Some(nats_stats) = match nats_monitor.as_mut() {
@@ -299,7 +328,10 @@ pub async fn run(
                             processes.push(nats_stats);
                         }
                         if let Ok(encoded) = serde_json::to_vec(&ServerMsg::Stats { processes }) {
-                            let _ = out.send(Bytes::from(encoded));
+                            let encoded = Bytes::from(encoded);
+                            for c in clients.lock().unwrap().values().filter(|c| c.stats) {
+                                let _ = c.tx.send(encoded.clone());
+                            }
                         }
                     }
                 }
@@ -573,6 +605,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         present: false,
         compact: false,
         debug: false,
+        stats: false,
         encoder: Encoder::new(state.config.pos_scale()),
     };
     state.clients.lock().unwrap().insert(id, client);
@@ -639,6 +672,31 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     };
     bus::publish(&state.nats, GROUP_COMMANDS.to_string(), &leave).await;
     info!(id, "player disconnected");
+}
+
+/// Subscribe to `subject` while `wanted`, and drop the subscription (unsubscribing) when not.
+async fn follow<T>(
+    nats: &async_nats::Client,
+    subject: &str,
+    wanted: bool,
+    feed: Option<mpsc::UnboundedReceiver<T>>,
+) -> Option<mpsc::UnboundedReceiver<T>>
+where
+    T: serde::de::DeserializeOwned + Send + 'static,
+{
+    match (wanted, feed) {
+        (true, None) => bus::subscribe::<T>(nats, subject).await.ok(),
+        (true, feed) => feed,
+        (false, _) => None,
+    }
+}
+
+/// The next message on a subscription we may not have.
+async fn next<T>(feed: &mut Option<mpsc::UnboundedReceiver<T>>) -> Option<T> {
+    match feed {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// When an input for (`tick`, `sub`) should take effect. Groups have already simulated tick
@@ -712,12 +770,16 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
             bus::publish(&state.nats, entity_subject(id), &env).await;
             None
         }
-        Ok(ClientMsg::Settings { compact, debug }) => {
+        Ok(ClientMsg::Settings {
+            compact,
+            debug,
+            stats,
+        }) => {
             if let Some(c) = state.clients.lock().unwrap().get_mut(&id) {
                 if c.compact != compact {
                     c.encoder.reset(); // the next snapshot sends everyone in full
                 }
-                (c.compact, c.debug) = (compact, debug);
+                (c.compact, c.debug, c.stats) = (compact, debug, stats);
             }
             None
         }

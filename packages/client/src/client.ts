@@ -59,6 +59,9 @@ export type ClientOptions<S, I, V> = {
   compact?: boolean;
   /** Include debug traffic (bus view, "what's near me?" questions). Default false. */
   debug?: boolean;
+  /** Get every process's numbers once a second (the `stats` handler). Default false; the
+   * debug panel turns it on. */
+  stats?: boolean;
   /** Your game's movement rules, to predict your own entity. */
   prediction?: PredictionRules<S, I, V>;
   /** Whether to predict your entity right now (say, not while dead). Default: always. */
@@ -127,6 +130,7 @@ export class WorldmeshClient<V = Named, E = Named, W = Named, I = unknown, C = N
   private closed = false;
   private compact: boolean;
   private debug: boolean;
+  private wantStats: boolean;
 
   private options: ClientOptions<S, I, V>;
   private listeners: ClientHandlers<V, E, W>[] = [];
@@ -137,6 +141,7 @@ export class WorldmeshClient<V = Named, E = Named, W = Named, I = unknown, C = N
     this.listeners.push(handlers);
     this.compact = options.compact ?? true;
     this.debug = options.debug ?? false;
+    this.wantStats = options.stats ?? false;
     if (options.prediction) {
       this.predictor = new Predictor(options.prediction, { substeps: 16, tickMs: this.tickMs, serverClock: () => this.serverClock() });
     }
@@ -162,7 +167,7 @@ export class WorldmeshClient<V = Named, E = Named, W = Named, I = unknown, C = N
   }
 
   get settings() {
-    return { compact: this.compact, debug: this.debug };
+    return { compact: this.compact, debug: this.debug, stats: this.wantStats };
   }
 
   connect() {
@@ -232,9 +237,10 @@ export class WorldmeshClient<V = Named, E = Named, W = Named, I = unknown, C = N
   }
 
   /** How you want snapshots. */
-  setSettings(settings: { compact?: boolean; debug?: boolean }) {
+  setSettings(settings: { compact?: boolean; debug?: boolean; stats?: boolean }) {
     this.compact = settings.compact ?? this.compact;
     this.debug = settings.debug ?? this.debug;
+    this.wantStats = settings.stats ?? this.wantStats;
     this.sendSettings();
   }
 
@@ -251,7 +257,7 @@ export class WorldmeshClient<V = Named, E = Named, W = Named, I = unknown, C = N
   }
 
   private sendSettings() {
-    this.send({ t: 'settings', compact: this.compact, debug: this.debug });
+    this.send({ t: 'settings', compact: this.compact, debug: this.debug, stats: this.wantStats });
   }
 
   private send(msg: ClientMsg<I, C>) {

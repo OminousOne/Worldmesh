@@ -70,6 +70,8 @@ export class DebugPanel {
     injectStyles();
     this.options = options;
     this.client = options.client;
+    // Every process's numbers, once a second: the gateway only sends them to players who ask.
+    this.client.setSettings({ stats: true });
     const parent = options.parent ?? document.body;
     this.root = make('div', parent, 'wm-debug');
     this.metrics = new MetricsPanel(make('div', parent, 'wm-metrics'), () => this.client.tickMs, {

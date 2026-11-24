@@ -27,6 +27,7 @@ new WorldmeshClient(
 | `url` | required | The gateway's WebSocket URL |
 | `compact` | `true` | Binary snapshots with only what changed |
 | `debug` | `false` | Include debug traffic (questions, bus messages) |
+| `stats` | `false` | Every process's numbers, once a second. The debug panel turns it on. |
 | `prediction` | none | Your movement rules (`PredictionRules`), to predict your own entity |
 | `shouldPredict(own)` | always | Whether to predict right now (say, not while dead) |
 | `reconnectMs` | `1000` | Reconnect this long after the connection drops |
@@ -39,7 +40,7 @@ new WorldmeshClient(
 | `added(entity)`, `removed(id)` | An entity came into view, or left it |
 | `handoff(id, from, to)` | An entity moved to another group |
 | `ownership(assignment)` | The assignment changed |
-| `stats(processes)` | Once a second |
+| `stats(processes)` | Once a second, if you asked for stats (the debug panel does) |
 
 More handlers can be added later with `client.listen(handlers)`, and listeners for one kind of event with `client.on(name, fn)`.
 
@@ -54,7 +55,7 @@ More handlers can be added later with `client.listen(handlers)`, and listeners f
 | `sendInput(input)` | Predicted at once, sent for the right tick and sub-step |
 | `sendCommand(name, data)` | A command for your entity, by name |
 | `on(name, fn)` | `fn(data, event)` for every event named `name`; returns a function that stops it |
-| `setSettings({ compact?, debug? })` | Switches compact snapshots and debug traffic |
+| `setSettings({ compact?, debug?, stats? })` | Switches compact snapshots, debug traffic and stats |
 | `sendDebug(command)` | Scaling, regroup, bus encoding, fake lag (`--allow-debug` gateways) |
 | `fakeLatency`, `fakeJitter` | Simulated delay on everything sent and received (ms) |
 | `predictor` | The `Predictor`, if prediction is on: `enabled`, `lead`, `stats`, `tick`, `predicted` |

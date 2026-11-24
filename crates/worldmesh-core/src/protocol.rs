@@ -66,6 +66,9 @@ pub enum ClientMsg {
         compact: bool,
         #[serde(default)]
         debug: bool,
+        /// Every process's numbers once a second (the debug panel asks for them).
+        #[serde(default)]
+        stats: bool,
     },
     /// Debug panel controls (development only: anyone connected can send these).
     Debug {

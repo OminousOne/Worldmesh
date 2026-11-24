@@ -110,7 +110,7 @@ If the two disagree, prediction still works: it just corrects (and glides) more 
 
 ```ts
 // Binary snapshots, no debug traffic.
-client.setSettings({ compact: true, debug: false });
+client.setSettings({ compact: true, debug: false, stats: false });
 // Fake delay on everything sent and received, in ms each way.
 client.fakeLatency = 100;
 // Up to this much more, without reordering.

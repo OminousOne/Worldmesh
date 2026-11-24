@@ -155,7 +155,7 @@ export type DebugCommand = {
 export type ClientMsg<I, C = Named> =
   | { t: 'input'; tick: number; sub: number; input: I }
   | { t: 'command'; name: keyof C & string; command: C[keyof C] }
-  | { t: 'settings'; compact: boolean; debug: boolean }
+  | { t: 'settings'; compact: boolean; debug: boolean; stats: boolean }
   | ({ t: 'debug' } & DebugCommand);
 
 /** Spatial Layer Cell ids have this bit set; group ids don't. */

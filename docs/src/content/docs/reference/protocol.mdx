@@ -19,7 +19,7 @@ Each message has a `t` field.
 { "t": "command", "name": "use",
   "command": { "ability": "bow", "target": { "entity": 7 } } }
 
-{ "t": "settings", "compact": true, "debug": false }
+{ "t": "settings", "compact": true, "debug": false, "stats": false }
 
 { "t": "debug", "set_groups": 4, "set_spatial": 3, "regroup": true,
   "binary_bus": true, "set_lag": [12345, 200] }
@@ -27,7 +27,7 @@ Each message has a `t` field.
 
 - `input`: your world's input, to take effect at sub-step `sub` of tick `tick` (tick 0: as soon as possible). Dropped unless it parses as your input type.
 - `command`: one of your world's commands, by name, for your own entity. Dropped unless `name` is registered as a command (not an action or event) and `command` parses as its type.
-- `settings`: compact binary snapshots or JSON; whether to include debug traffic. Until the first `settings`, snapshots are JSON without debug traffic.
+- `settings`: compact binary snapshots or JSON; whether to include debug traffic; whether to get every process's `stats` once a second (the debug panel asks for them). Until the first `settings`, snapshots are JSON without debug traffic or stats.
 - `debug`: every field optional. Refused unless the gateway runs with `--allow-debug`.
 
 ## Gateway to browser
