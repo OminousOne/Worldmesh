@@ -26,7 +26,7 @@
   <!-- bus -->
   <rect x="36" y="172" width="688" height="42" rx="21" fill="#00435a"/>
   <rect x="40" y="176" width="680" height="34" rx="17" fill="#0bf4fd"/>
-  <text x="380" y="198" text-anchor="middle" fill="#00435a" font-weight="700">NATS bus</text>
+  <text x="380" y="198" text-anchor="middle" fill="#00435a"><tspan font-weight="700">NATS bus</tspan>: one server, or a cluster of as many as you need</text>
   <line x1="210" y1="144" x2="210" y2="170" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
   <line x1="380" y1="144" x2="380" y2="170" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
   <line x1="550" y1="144" x2="550" y2="170" stroke="#85a3af" stroke-width="1.5" stroke-dasharray="4 4" marker-start="url(#a)" marker-end="url(#a)"/>

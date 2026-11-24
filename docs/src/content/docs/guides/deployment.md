@@ -7,7 +7,7 @@ A world is NATS plus four kinds of process, all from your game's one binary:
 
 | Process | How many | Notes |
 | --- | --- | --- |
-| NATS | 1, or a cluster | Port 4222. Turn on monitoring (`-m 8222`): the gateway can show it in the metrics. |
+| NATS | 1, or a cluster of any size | Port 4222. Turn on monitoring (`-m 8222`): the gateway can show it in the metrics. See [Scaling the bus](#scaling-the-bus). |
 | Orchestrator | Exactly 1 | Starts with `--groups` and `--spatial` in use |
 | Group processes | Any number | Each runs as many Server Entity Groups as the orchestrator asks for |
 | Spatial Layer Cells | Any number | One cell per process. Run a few more than you use, to scale into. |
@@ -24,6 +24,21 @@ my-game gateway --listen 0.0.0.0:8080 --nats-monitor nats:8222
 ```
 
 `examples/medieval/docker-compose.yml` is a complete setup to start from, and `examples/medieval/Dockerfile` builds one image for every role. Every option is in [Configuration and CLI](/Worldmesh/reference/configuration/).
+
+## Scaling the bus
+
+The bus scales horizontally. Run NATS as a [cluster](https://docs.nats.io/running-a-nats-service/configuration/clustering) of as many servers as you need, and give every process the cluster's addresses:
+
+```sh
+export NATS_URL=nats://nats-1:4222,nats://nats-2:4222,nats://nats-3:4222
+```
+
+- **Processes spread out.** Each connects to one of the listed servers at random, and learns the rest of the cluster from it.
+- **A server can stop.** Its processes move to another server and carry on. We test this by stopping one of three servers mid-game: every process moves over and the game carries on.
+- **Traffic is split by subject.** Almost everything Worldmesh sends is addressed to one process: one entity, one group, one cell or one gateway. NATS carries each message only to the servers with a subscriber for it, so each server handles only its share.
+- **Regions.** For a world served from several places, NATS [superclusters](https://docs.nats.io/running-a-nats-service/configuration/gateways) join clusters, and send across only what the other side subscribes to.
+
+A few subjects reach every process of a role: assignments, where players are looking, and actions sent to everyone. They're small, or rare, or both.
 
 ## In production
 

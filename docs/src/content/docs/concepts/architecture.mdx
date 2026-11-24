@@ -65,7 +65,7 @@ A slow process only delays its own part: cells wait at most 40 ms for reports, a
 
 ## The bus
 
-Everything goes over NATS as MessagePack. JSON can be switched on live, for reading the traffic.
+Everything goes over NATS as MessagePack. JSON can be switched on live, for reading the traffic. NATS can be one server or a cluster of as many as you need: [Scaling the bus](/Worldmesh/guides/deployment/#scaling-the-bus) shows how.
 
 Each entity has its own subject, so nobody needs to know which group simulates it. A group subscribes to exactly the entities it holds, plus, for a second after a handoff, the ones it just gave away, so it can forward anything that still arrives for them.
 

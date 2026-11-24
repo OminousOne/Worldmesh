@@ -61,6 +61,7 @@ What a player receives depends on how much is in their view and how much of it c
 | --- | --- |
 | More groups | Splits the simulation. Each group's load drops roughly in proportion. Adds a little report traffic. |
 | More cells | Splits questions and view building. Questions near a border go to two cells. |
+| More NATS servers | Spreads connections and traffic: each message goes only to the servers with a subscriber for it. |
 | `chunk_size` | Smaller chunks split areas more evenly but cost more bookkeeping. 8 tiles is a good start. |
 | `TICK_HZ` | Higher is smoother and more responsive, and multiplies every per-tick cost. |
 | View size | Bigger views mean bigger snapshots and more cells per view. |

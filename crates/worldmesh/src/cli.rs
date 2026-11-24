@@ -33,7 +33,9 @@ use {
 #[derive(Debug, Clone, Parser)]
 #[command(about = "A Worldmesh world process")]
 pub struct Cli {
-    /// NATS bus address.
+    /// NATS bus address. For a NATS cluster, list several, separated by commas: the process
+    /// connects to one of them at random (spreading processes over the cluster), and moves to
+    /// another if its server stops.
     #[arg(long, env = "NATS_URL", default_value = "nats://127.0.0.1:4222")]
     pub nats_url: String,
 
@@ -130,10 +132,23 @@ pub async fn run_with(world: World, cli: Cli) -> Result<()> {
 }
 
 /// Connect to NATS, retrying every second: the bus may still be starting (docker compose
-/// doesn't wait for readiness).
+/// doesn't wait for readiness). `url` may list several servers of a cluster, separated by
+/// commas; the client also learns the cluster's other servers from the one it reaches.
 pub async fn connect_with_retry(url: &str) -> async_nats::Client {
+    let servers = match parse_servers(url) {
+        Ok(servers) => servers,
+        Err(err) => {
+            warn!(url, %err, "can't read the NATS address; using it as it is");
+            vec![]
+        }
+    };
     loop {
-        match async_nats::connect(url).await {
+        let attempt = if servers.is_empty() {
+            async_nats::connect(url).await
+        } else {
+            async_nats::connect(servers.clone()).await
+        };
+        match attempt {
             Ok(client) => {
                 info!(url, "connected to bus");
                 return client;
@@ -144,6 +159,15 @@ pub async fn connect_with_retry(url: &str) -> async_nats::Client {
             }
         }
     }
+}
+
+/// `nats://a:4222, nats://b:4222` as a list of servers.
+fn parse_servers(url: &str) -> Result<Vec<async_nats::ServerAddr>, String> {
+    url.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse().map_err(|e: std::io::Error| format!("{s}: {e}")))
+        .collect()
 }
 
 #[cfg(test)]
@@ -173,5 +197,13 @@ mod tests {
         assert!(Cli::try_parse_from(["game", "group", "--group-id", "7"]).is_ok());
         assert!(Cli::try_parse_from(["game", "spatial"]).is_ok());
         assert!(Cli::try_parse_from(["game"]).is_err(), "a role is required");
+    }
+
+    #[test]
+    fn a_nats_address_can_list_a_clusters_servers() {
+        assert_eq!(parse_servers("nats://127.0.0.1:4222").unwrap().len(), 1);
+        let servers = parse_servers("nats://a:4222, nats://b:4222,nats://c:4222").unwrap();
+        let hosts: Vec<&str> = servers.iter().map(|s| s.host()).collect();
+        assert_eq!(hosts, vec!["a", "b", "c"]);
     }
 }
