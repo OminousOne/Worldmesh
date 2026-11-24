@@ -25,11 +25,12 @@ use tracing::{info, warn};
 use worldmesh_core::config::{partition, WorldConfig};
 use worldmesh_core::protocol::{
     Assignment, DebugCommand, EntityId, GroupCommand, GroupCommandKind, GroupId, Heartbeat,
-    HostCommand, JoinRequest, NewEntity, SpawnRequest, SPAWNED_ID_START,
+    HostCommand, JoinRequest, NewEntity, PlayerIdRequest, PlayerIds, SpawnRequest,
+    SPAWNED_ID_START,
 };
 use worldmesh_core::subjects::{
-    random_process_id, ASSIGNMENTS, DEBUG_COMMANDS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS,
-    JOINS, SPAWNS,
+    gateway_ids_subject, random_process_id, ASSIGNMENTS, DEBUG_COMMANDS, GROUP_COMMANDS,
+    HEARTBEATS, HOST_COMMANDS, JOINS, PLAYER_IDS, SPAWNS,
 };
 use worldmesh_core::{bus, stats, time};
 
@@ -38,6 +39,46 @@ const PROCESS_TIMEOUT: Duration = Duration::from_secs(3);
 /// A release isn't repeated for the same entity within this long (the group may not have
 /// reported the handoff yet).
 const RESEND_MOVE_AFTER: Duration = Duration::from_secs(2);
+/// Gateways tell us the highest player id they hold about once a second. After starting, we
+/// wait this long before handing out any, so a restarted orchestrator has heard from every
+/// gateway and never gives out an id one already has.
+const ID_GRACE: Duration = Duration::from_millis(2500);
+/// Most player ids one gateway gets at a time.
+const MAX_ID_BLOCK: u32 = 256;
+
+/// Player ids, handed to gateways a few at a time so no two gateways give out the same one.
+/// Counts up from 1, never at or below the highest id any gateway says it holds.
+#[derive(Debug)]
+pub struct PlayerIdBook {
+    next: EntityId,
+}
+
+impl Default for PlayerIdBook {
+    fn default() -> Self {
+        Self { next: 1 }
+    }
+}
+
+impl PlayerIdBook {
+    /// Notes the highest id this gateway holds, and gives it the ids it asked for, if any and
+    /// if we're `ready` to give ids out.
+    pub fn request(&mut self, request: &PlayerIdRequest, ready: bool) -> Option<PlayerIds> {
+        self.next = self.next.max(request.above.saturating_add(1));
+        if !ready || request.count == 0 {
+            return None;
+        }
+        let count = request.count.min(MAX_ID_BLOCK);
+        if self.next.saturating_add(count) > SPAWNED_ID_START {
+            // 2³¹ players later: start over. Players connected that long ago are long gone.
+            warn!("player ids ran out: starting again from 1");
+            self.next = 1;
+        }
+        let first = self.next;
+        self.next += count;
+        Some(PlayerIds { first, count })
+    }
+}
+
 /// Safety limit on groups in use (each one ticks every tick, even empty).
 pub const MAX_GROUPS: u32 = 1000;
 /// Most fake lag (debug) a group can be given, in ms.
@@ -172,6 +213,13 @@ struct Orchestrator {
     pending_joins: Vec<JoinRequest>,
     /// The next id to give an entity the game spawns.
     next_spawn_id: EntityId,
+    /// Ids for players, handed to gateways.
+    player_ids: PlayerIdBook,
+    /// Gateways, and when each last asked for ids (they do about once a second).
+    gateways: BTreeMap<u32, Instant>,
+    /// Players, by the gateway they're connected to (and when they joined): if it stops, their
+    /// entities are removed, as if each had disconnected.
+    players: BTreeMap<EntityId, (u32, Instant)>,
     /// Bus encoding everyone uses (debug toggle).
     binary_bus: bool,
     /// Fake network lag per group, in ms (debug).
@@ -304,6 +352,44 @@ impl Orchestrator {
             })
             .collect();
         self.place(joins).await;
+    }
+
+    /// A gateway that stopped can't say its players left: remove their entities for it. Also
+    /// forget players who are gone (they left, or their group stopped).
+    async fn drop_stopped_gateways(&mut self, now: Instant) {
+        let stopped: Vec<u32> = self
+            .gateways
+            .iter()
+            .filter(|(_, seen)| now.duration_since(**seen) >= PROCESS_TIMEOUT)
+            .map(|(&id, _)| id)
+            .collect();
+        for gateway in stopped {
+            self.gateways.remove(&gateway);
+            let players: Vec<EntityId> = self
+                .players
+                .iter()
+                .filter(|(_, (g, _))| *g == gateway)
+                .map(|(&id, _)| id)
+                .collect();
+            warn!(
+                gateway = format!("{gateway:08x}"),
+                players = players.len(),
+                "gateway stopped responding: removing its players"
+            );
+            for id in players {
+                self.players.remove(&id);
+                let leave = GroupCommand {
+                    to: None,
+                    kind: GroupCommandKind::Leave { id },
+                };
+                bus::publish(&self.nats, GROUP_COMMANDS.to_string(), &leave).await;
+            }
+        }
+        // Joined over 10 s ago and no group has them: they left.
+        let members = &self.members;
+        self.players.retain(|id, (_, joined)| {
+            members.contains_key(id) || now.duration_since(*joined) < Duration::from_secs(10)
+        });
     }
 
     /// Entities the game spawned: give each an id, then place them like joins.
@@ -522,6 +608,7 @@ pub async fn run(
     let mut debug = bus::subscribe::<DebugCommand>(&nats, DEBUG_COMMANDS).await?;
     let mut joins = bus::subscribe::<JoinRequest>(&nats, JOINS).await?;
     let mut spawns = bus::subscribe::<SpawnRequest>(&nats, SPAWNS).await?;
+    let mut id_requests = bus::subscribe::<PlayerIdRequest>(&nats, PLAYER_IDS).await?;
     let mut o = Orchestrator {
         nats: nats.clone(),
         config,
@@ -541,6 +628,9 @@ pub async fn run(
         pending_joins: Vec::new(),
         // Start somewhere new each run, so a restarted orchestrator doesn't reuse recent ids.
         next_spawn_id: SPAWNED_ID_START + ((time::world_ms() / 100) as u32 & 0x3FFF_FFFF),
+        player_ids: PlayerIdBook::default(),
+        gateways: BTreeMap::new(),
+        players: BTreeMap::new(),
         binary_bus: true,
         lag: BTreeMap::new(),
     };
@@ -559,10 +649,20 @@ pub async fn run(
         tokio::select! {
             Some(hb) = heartbeats.recv() => o.heartbeat(hb),
             Some(join) = joins.recv() => {
+                if join.gateway != 0 {
+                    o.gateways.insert(join.gateway, Instant::now());
+                    o.players.insert(join.id, (join.gateway, Instant::now()));
+                }
                 o.pending_joins.push(join);
                 o.place_joins().await;
             }
             Some(request) = spawns.recv() => o.spawn(request).await,
+            Some(request) = id_requests.recv() => {
+                o.gateways.insert(request.gateway, Instant::now());
+                if let Some(ids) = o.player_ids.request(&request, started.elapsed() >= ID_GRACE) {
+                    bus::publish(&nats, gateway_ids_subject(request.gateway), &ids).await;
+                }
+            }
             Some(cmd) = debug.recv() => {
                 if let Some(n) = cmd.set_groups {
                     o.desired_groups = n.clamp(1, MAX_GROUPS);
@@ -602,6 +702,7 @@ pub async fn run(
             }
             alive
         });
+        o.drop_stopped_gateways(now).await;
         let live_groups: Vec<u32> = o.groups.keys().copied().collect();
         o.members.retain(|_, (g, ..)| live_groups.contains(g)); // a dead group's entities are gone
         o.hosts
@@ -707,6 +808,50 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    fn ask(gateway: u32, count: u32, above: u32) -> PlayerIdRequest {
+        PlayerIdRequest {
+            gateway,
+            count,
+            above,
+        }
+    }
+
+    #[test]
+    fn gateways_get_player_ids_no_other_gateway_has() {
+        let mut book = PlayerIdBook::default();
+        let a = book.request(&ask(1, 32, 0), true).unwrap();
+        let b = book.request(&ask(2, 32, 0), true).unwrap();
+        assert_eq!((a.first, a.count), (1, 32), "ids start at 1");
+        assert_eq!(
+            (b.first, b.count),
+            (33, 32),
+            "the next gateway's start after them"
+        );
+        assert_eq!(
+            book.request(&ask(1, 0, 32), true),
+            None,
+            "none wanted, none given"
+        );
+        assert_eq!(
+            book.request(&ask(1, 10_000, 32), true).unwrap().count,
+            MAX_ID_BLOCK
+        );
+    }
+
+    #[test]
+    fn a_restarted_orchestrator_carries_on_above_every_gateways_ids() {
+        // A new orchestrator: gateways tell it what they hold before it gives any out.
+        let mut book = PlayerIdBook::default();
+        assert_eq!(
+            book.request(&ask(1, 32, 4000), false),
+            None,
+            "still waiting"
+        );
+        assert_eq!(book.request(&ask(2, 0, 9000), false), None);
+        let ids = book.request(&ask(1, 32, 4000), true).unwrap();
+        assert_eq!(ids.first, 9001, "above everything any gateway holds");
     }
 
     fn counts(p: &BTreeMap<u32, u32>, groups: &[u32]) -> Vec<usize> {

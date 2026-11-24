@@ -7,19 +7,29 @@
   </defs>
   <rect width="760" height="400" rx="16" fill="#0b2a36"/>
   <!-- players -->
-  <rect x="300" y="16" width="160" height="42" rx="10" fill="#0f3644" stroke="#ffc61a" stroke-width="2"/>
-  <text x="380" y="42" text-anchor="middle" fill="#ffffff" font-weight="700">Players (browsers)</text>
-  <line x1="380" y1="58" x2="380" y2="88" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
-  <text x="390" y="78" fill="#85a3af" font-size="11">WebSocket</text>
-  <!-- gateway -->
-  <rect x="290" y="90" width="180" height="48" rx="10" fill="#0f3644" stroke="#38b6ff" stroke-width="2"/>
-  <text x="380" y="111" text-anchor="middle" fill="#ffffff" font-weight="700">Gateway</text>
-  <text x="380" y="128" text-anchor="middle" fill="#9fb9c3" font-size="11">merges views, checks inputs</text>
+  <rect x="200" y="14" width="360" height="40" rx="10" fill="#0f3644" stroke="#ffc61a" stroke-width="2"/>
+  <text x="380" y="39" text-anchor="middle" fill="#ffffff" font-weight="700">Players (browsers)</text>
+  <line x1="210" y1="54" x2="210" y2="94" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="380" y1="54" x2="380" y2="94" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="550" y1="54" x2="550" y2="94" stroke="#85a3af" stroke-width="1.5" stroke-dasharray="4 4" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="220" y="78" fill="#85a3af" font-size="11">WebSocket</text>
+  <!-- gateways: any number -->
+  <rect x="135" y="96" width="150" height="48" rx="10" fill="#0f3644" stroke="#38b6ff" stroke-width="2"/>
+  <text x="210" y="117" text-anchor="middle" fill="#ffffff" font-weight="700">Gateway</text>
+  <text x="210" y="134" text-anchor="middle" fill="#9fb9c3" font-size="11">merges its players' views</text>
+  <rect x="305" y="96" width="150" height="48" rx="10" fill="#0f3644" stroke="#38b6ff" stroke-width="2"/>
+  <text x="380" y="117" text-anchor="middle" fill="#ffffff" font-weight="700">Gateway</text>
+  <text x="380" y="134" text-anchor="middle" fill="#9fb9c3" font-size="11">merges its players' views</text>
+  <rect x="475" y="96" width="150" height="48" rx="10" fill="none" stroke="#38b6ff" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="550" y="117" text-anchor="middle" fill="#38b6ff" font-weight="700">+ more gateways</text>
+  <text x="550" y="134" text-anchor="middle" fill="#9fb9c3" font-size="11">down to one per player</text>
   <!-- bus -->
   <rect x="36" y="172" width="688" height="42" rx="21" fill="#00435a"/>
   <rect x="40" y="176" width="680" height="34" rx="17" fill="#0bf4fd"/>
   <text x="380" y="198" text-anchor="middle" fill="#00435a" font-weight="700">NATS bus</text>
-  <line x1="380" y1="138" x2="380" y2="170" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="210" y1="144" x2="210" y2="170" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="380" y1="144" x2="380" y2="170" stroke="#85a3af" stroke-width="1.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line x1="550" y1="144" x2="550" y2="170" stroke="#85a3af" stroke-width="1.5" stroke-dasharray="4 4" marker-start="url(#a)" marker-end="url(#a)"/>
   <!-- groups -->
   <rect x="40" y="252" width="200" height="120" rx="12" fill="#0f3644" stroke="#ff8a2a" stroke-width="2"/>
   <rect x="56" y="252" width="168" height="6" rx="3" fill="#ff8a2a"/>

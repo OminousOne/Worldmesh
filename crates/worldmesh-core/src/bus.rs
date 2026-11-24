@@ -71,7 +71,9 @@ impl MsgKind {
             MsgKind::Senses
         } else if subject.ends_with(".inbox") || subject.starts_with("entity.") {
             MsgKind::Envelopes
-        } else if subject == crate::subjects::VIEWS || subject == crate::subjects::VIEWERS {
+        } else if subject == crate::subjects::VIEWERS
+            || (subject.starts_with("gateway.") && subject.ends_with(".views"))
+        {
             MsgKind::Views
         } else if subject == crate::subjects::DEBUG_REPORTS {
             MsgKind::Debug
@@ -437,7 +439,10 @@ mod tests {
         assert_eq!(MsgKind::of(&group_inbox_subject(3)), MsgKind::Envelopes);
         assert_eq!(MsgKind::of(BROADCAST), MsgKind::Envelopes);
         assert_eq!(MsgKind::of(&entity_subject(3)), MsgKind::Envelopes);
-        assert_eq!(MsgKind::of(VIEWS), MsgKind::Views);
+        assert_eq!(MsgKind::of(VIEWERS), MsgKind::Views);
+        assert_eq!(MsgKind::of(&gateway_views_subject(77)), MsgKind::Views);
+        assert_eq!(MsgKind::of(&gateway_ids_subject(77)), MsgKind::Control);
+        assert_eq!(MsgKind::of(PLAYER_IDS), MsgKind::Control);
         assert_eq!(MsgKind::of(DEBUG_REPORTS), MsgKind::Debug);
         assert_eq!(MsgKind::of(HEARTBEATS), MsgKind::Control);
     }

@@ -7,7 +7,7 @@ import TickSteps from '../../../components/diagrams/TickSteps.astro';
 
 A Worldmesh world is a set of processes that talk over [NATS](https://nats.io). They all run your game's binary, each in one of four roles.
 
-![Players connect to a gateway. The gateway, Server Entity Groups, Spatial Layer Cells and the orchestrator all talk over the NATS bus.](../../../assets/architecture.svg)
+![Players connect to any of several gateways. Gateways, Server Entity Groups, Spatial Layer Cells and the orchestrator all talk over the NATS bus.](../../../assets/architecture.svg)
 
 ## Server Entity Groups
 
@@ -28,7 +28,7 @@ A cell owns an area: a set of chunks, each `chunk_size` tiles square. It simulat
 
 - answers "what's near me?" questions, back to the asking group before its next tick,
 - passes actions aimed at an area to every group with an entity in range,
-- builds each player's view of its area, for the gateway.
+- builds each player's view of its area, for that player's gateway.
 
 A cell rebuilds everything from the reports every tick. So moving an area to another cell hands nothing off: groups just send their next reports to the new owner.
 
@@ -42,17 +42,26 @@ It never sees game traffic and never runs game code.
 
 A gateway holds players' WebSockets. It:
 
-- welcomes each player with your welcome values, the world config and the schema (the names of your components, messages and kinds), and asks the orchestrator to place them with your `join` function,
+- welcomes each player with an id, your welcome values, the world config and the schema (the names of your components, messages and kinds), and asks the orchestrator to place them with your `join` function,
 - checks every input and command against your types, drops anything that doesn't parse or isn't a registered command, and sends the rest to the player's entity, wherever it is,
-- every tick, tells the cells where each player is looking, merges the views they send back, and sends each player a snapshot.
+- every tick, tells the cells where its players are looking, merges the views they send back, and sends each player a snapshot.
+
+Run as many gateways as you need, behind a load balancer, down to one per player. They need no configuration:
+
+- **Each picks its own id**, and cells send each gateway only its own players' views.
+- **Player ids come from the orchestrator**, a few at a time, so no two gateways give out the same one.
+- **Any player can connect to any gateway.** Who they see doesn't depend on it: views come from the cells, which hold everyone.
+- **A gateway that stops takes its players with it.** After 3 seconds without a word from it, the orchestrator removes their entities, and they can reconnect through another.
+
+Each gateway adds two small messages per cell per tick (where its players are looking, and their views back), so a few busy gateways cost the bus less than many quiet ones.
 
 ## One tick
 
-At the default 10 ticks per second, all of this happens every 100 ms. Step through it:
+At the default 10 ticks per second, all of this happens every 100 ms. Step through it, with two of everything:
 
 <TickSteps />
 
-A slow process only delays its own part: cells wait at most 40 ms for reports, and the gateway at most 60 ms for views.
+A slow process only delays its own part: cells wait at most 40 ms for reports, and gateways at most 60 ms for views.
 
 ## The bus
 
@@ -68,6 +77,7 @@ Each entity has its own subject, so nobody needs to know which group simulates i
 | `group.<id>.senses` | Cells to one group | Answers to "what's near me?" |
 | `spatial.<id>.reports` | Groups to one cell | Each tick's report |
 | `spatial.<id>.inbox` | Groups to one cell | Actions aimed at an area |
-| `spatial.viewers` | Gateway to cells | Where players are looking |
-| `gateway.views` | Cells to gateways | Players' views |
-| `control.*` | Various | Heartbeats, assignments, joins, spawns, commands, stats |
+| `spatial.viewers` | Gateways to cells | Where each gateway's players are looking |
+| `gateway.<id>.views` | Cells to one gateway | Its players' views |
+| `gateway.<id>.ids` | Orchestrator to one gateway | Player ids for it to give out |
+| `control.*` | Various | Heartbeats, assignments, joins, spawns, player ids, commands, stats |

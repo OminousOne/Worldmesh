@@ -12,6 +12,7 @@
 // leads to shares a trace id). The game says which of its events start and end a trace.
 
 import { isSpatial, type BusMsg, type ProcessStats, type StreamMsg } from '@worldmesh/client';
+import { gatewayTotals } from './gateways.ts';
 
 /** What a game event says about a trace, for the "recent actions" list. */
 export type TraceNote = {
@@ -62,7 +63,8 @@ export class BusView {
   private groupsInUse: number[] = [];
   private spatialInUse: number[] = [];
   private stats = new Map<number, ProcessStats>();
-  private gatewayStats: ProcessStats | undefined;
+  /** Every gateway's numbers, added up: the bus view draws them as one. */
+  private gatewayStats: (ProcessStats & { count: number }) | undefined;
   private orchestratorStats: ProcessStats | undefined;
   private natsStats: ProcessStats | undefined;
   /** Recent message times per kind, for the per-second counts in the legend. */
@@ -145,8 +147,8 @@ export class BusView {
 
   onStats(processes: ProcessStats[]) {
     this.stats.clear();
+    this.gatewayStats = gatewayTotals(processes);
     for (const p of processes) {
-      if (p.role === 'gateway') this.gatewayStats = p;
       if (p.role === 'group' || p.role === 'spatial') this.stats.set(p.id, p);
       if (p.role === 'orchestrator') this.orchestratorStats = p;
       if (p.role === 'nats') this.natsStats = p;
@@ -265,7 +267,7 @@ export class BusView {
   }
 
   private label(id: number) {
-    if (id === GATEWAY) return 'Gateway';
+    if (id === GATEWAY) return (this.gatewayStats?.count ?? 1) > 1 ? `Gateways (${this.gatewayStats!.count})` : 'Gateway';
     if (id === ORCHESTRATOR) return 'Orchestrator';
     if (id === NATS) return 'NATS';
     return this.nameOf(id).replace(/ \(.*\)/, '');

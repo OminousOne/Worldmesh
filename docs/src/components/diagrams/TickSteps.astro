@@ -1,50 +1,67 @@
 ---
-// One tick of a running world, step by step: groups simulate, report to cells, cells answer
-// and build views, the gateway sends snapshots, and everything sent waits for the next tick.
+// One tick of a running world, step by step: groups simulate and report to cells, gateways
+// say where their players are looking, cells answer and send each gateway its players' views,
+// gateways send snapshots, and everything sent waits for the next tick.
 
 type Node = { id: string; label: string; sub: string; x: number; y: number; role: string };
-const W = 150;
+const W = 135;
 const H = 58;
+const col = [10, 210, 410, 615];
+const row = [40, 210];
 const nodes: Node[] = [
-  { id: 'g1', label: 'Group 1', sub: 'simulates its entities', x: 20, y: 40, role: 'group' },
-  { id: 'g2', label: 'Group 2', sub: 'simulates its entities', x: 20, y: 200, role: 'group' },
-  { id: 'ca', label: 'Cell A', sub: 'owns half the map', x: 285, y: 40, role: 'cell' },
-  { id: 'cb', label: 'Cell B', sub: 'owns the other half', x: 285, y: 200, role: 'cell' },
-  { id: 'gw', label: 'Gateway', sub: 'merges views', x: 550, y: 40, role: 'gateway' },
-  { id: 'pl', label: 'Players', sub: 'browsers', x: 550, y: 200, role: 'player' },
+  { id: 'g1', label: 'Group 1', sub: 'simulates', x: col[0], y: row[0], role: 'group' },
+  { id: 'g2', label: 'Group 2', sub: 'simulates', x: col[0], y: row[1], role: 'group' },
+  { id: 'ca', label: 'Cell A', sub: 'half the map', x: col[1], y: row[0], role: 'cell' },
+  { id: 'cb', label: 'Cell B', sub: 'the other half', x: col[1], y: row[1], role: 'cell' },
+  { id: 'w1', label: 'Gateway 1', sub: 'merges views', x: col[2], y: row[0], role: 'gateway' },
+  { id: 'w2', label: 'Gateway 2', sub: 'merges views', x: col[2], y: row[1], role: 'gateway' },
+  { id: 'p1', label: 'Players', sub: 'on gateway 1', x: col[3], y: row[0], role: 'player' },
+  { id: 'p2', label: 'Players', sub: 'on gateway 2', x: col[3], y: row[1], role: 'player' },
 ];
 const at = (id: string) => nodes.find((n) => n.id === id)!;
 const right = (n: Node) => [n.x + W, n.y + H / 2] as const;
 const left = (n: Node) => [n.x, n.y + H / 2] as const;
 
-// Each edge: a path, and the steps it's busy in.
 // `lane` shifts both ends up or down, so traffic each way gets its own line.
 const curve = (a: readonly [number, number], b: readonly [number, number], lane = 0) => {
   const mx = (a[0] + b[0]) / 2;
   return `M${a[0]} ${a[1] + lane}C${mx} ${a[1] + lane} ${mx} ${b[1] + lane} ${b[0]} ${b[1] + lane}`;
 };
-const edges = [
-  { id: 'g1-ca', role: 'group', d: curve(right(at('g1')), left(at('ca')), -8), steps: [1] },
-  { id: 'g1-cb', role: 'group', d: curve(right(at('g1')), left(at('cb')), -8), steps: [1] },
-  { id: 'g2-ca', role: 'group', d: curve(right(at('g2')), left(at('ca')), -8), steps: [1] },
-  { id: 'g2-cb', role: 'group', d: curve(right(at('g2')), left(at('cb')), -8), steps: [1] },
-  { id: 'ca-g1', role: 'cell', d: curve(left(at('ca')), right(at('g1')), 9), steps: [2], back: true },
-  { id: 'cb-g2', role: 'cell', d: curve(left(at('cb')), right(at('g2')), 9), steps: [2], back: true },
-  { id: 'ca-gw', role: 'cell', d: curve(right(at('ca')), left(at('gw'))), steps: [2] },
-  { id: 'cb-gw', role: 'cell', d: curve(right(at('cb')), left(at('gw'))), steps: [2] },
-  {
-    id: 'gw-pl',
-    d: `M${at('gw').x + W / 2} ${at('gw').y + H}L${at('pl').x + W / 2} ${at('pl').y}`,
-    steps: [3],
-  },
+type Edge = { id: string; role: string; d: string; steps: number[]; back?: boolean };
+const edge = (from: string, to: string, step: number, lane: number, back = false): Edge => {
+  const a = at(from);
+  const b = at(to);
+  const forward = a.x < b.x;
+  return {
+    id: `${from}-${to}`,
+    role: a.role,
+    d: curve(forward ? right(a) : left(a), forward ? left(b) : right(b), lane),
+    steps: [step],
+    back,
+  };
+};
+// Each edge is busy in one step.
+const edges: Edge[] = [
+  // Step 2: reports, and where players are looking.
+  ...['g1', 'g2'].flatMap((g) => ['ca', 'cb'].map((c) => edge(g, c, 1, -8))),
+  ...['w1', 'w2'].flatMap((w) => ['ca', 'cb'].map((c) => edge(w, c, 1, 9, true))),
+  // Step 3: answers back to the groups, and each gateway's own players' views.
+  edge('ca', 'g1', 2, 9, true),
+  edge('cb', 'g2', 2, 9, true),
+  ...['ca', 'cb'].flatMap((c) => ['w1', 'w2'].map((w) => edge(c, w, 2, -8))),
+  // Step 4: snapshots.
+  edge('w1', 'p1', 3, 0),
+  edge('w2', 'p2', 3, 0),
 ];
 const nodeSteps: Record<string, number[]> = {
-  g1: [0, 4],
-  g2: [0, 4],
+  g1: [0, 1, 4],
+  g2: [0, 1, 4],
   ca: [2],
   cb: [2],
-  gw: [3],
-  pl: [3],
+  w1: [1, 3],
+  w2: [1, 3],
+  p1: [3],
+  p2: [3],
 };
 
 const steps = [
@@ -56,21 +73,21 @@ const steps = [
   },
   {
     role: 'group',
-    title: 'Groups report to cells',
+    title: 'Reports go to the cells',
     when: 'a few ms in',
-    body: "Each group sends every cell a report of its entities in that cell's area: positions, kinds, visible components, and any \"what's near me?\" questions. Actions aimed at an area go to that area's cell.",
+    body: "Each group sends every cell a report of its entities in that cell's area: positions, kinds, visible components, and any \"what's near me?\" questions. Each gateway tells every cell where its players are looking.",
   },
   {
     role: 'cell',
     title: 'Cells answer and build views',
     when: 'once every report is in',
-    body: "With every group's report in (or after 40 ms), a cell answers the questions, passes area actions on to the groups with entities in range, and builds each player's view of its area.",
+    body: "With every group's report in (or after 40 ms), a cell answers the questions, passes area actions on to the groups with entities in range, and builds each player's view of its area. Each gateway gets only its own players' views.",
   },
   {
     role: 'gateway',
-    title: 'The gateway sends snapshots',
+    title: 'Gateways send snapshots',
     when: 'once every view is in',
-    body: "With every cell's views in (or after 60 ms), the gateway merges each player's parts and sends them one snapshot with only what changed.",
+    body: "With every cell's views in (or after 60 ms), each gateway merges its players' parts and sends each of them one snapshot with only what changed.",
   },
   {
     role: 'group',
@@ -82,7 +99,7 @@ const steps = [
 ---
 
 <figure class="wm-figure not-content wm-ticksteps" data-step="0">
-  <svg viewBox="0 0 720 280" role="img" aria-label="Groups, cells, the gateway and players, with the messages of one tick">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Two groups, two cells, two gateways and their players, with the messages of one tick">
     <defs>
       <marker id="wm-tick-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
         <path d="M0 0 10 5 0 10z" />
@@ -111,8 +128,8 @@ const steps = [
       ))
     }
     <g class="inbox" data-steps="4">
-      <circle cx={20 + W} cy="40" r="9" />
-      <circle cx={20 + W} cy="200" r="9" />
+      <circle cx={col[0] + W} cy={row[0]} r="9" />
+      <circle cx={col[0] + W} cy={row[1]} r="9" />
     </g>
   </svg>
   <ol class="wm-steps">
@@ -152,6 +169,9 @@ const steps = [
   .role-player {
     --role: var(--wm-role-player);
   }
+  .edge.back.role-gateway {
+    stroke-dasharray: 3 4;
+  }
   .node rect {
     fill: var(--wm-fig-node);
     stroke: color-mix(in oklab, var(--role) 45%, var(--wm-fig-line));
@@ -175,7 +195,7 @@ const steps = [
   .node.on rect:not(.band) {
     stroke: var(--role);
     stroke-width: 3;
-    fill: color-mix(in oklab, var(--role) 26%, var(--wm-fig-node));
+    fill: color-mix(in oklab, var(--role) 14%, var(--wm-fig-node));
   }
   .edge {
     fill: none;

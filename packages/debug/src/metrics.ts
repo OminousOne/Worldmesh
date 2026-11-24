@@ -3,6 +3,7 @@
 // Server Entity Groups and Spatial Layer Cells are doing.
 
 import type { ProcessStats, Rate } from '@worldmesh/client';
+import { gatewayTotals } from './gateways.ts';
 
 /** Kinds of bus message in the "by kind" graph, in the order the server reports them. */
 const BUS_KINDS: { kind: string; name: string; color: string }[] = [
@@ -506,7 +507,7 @@ export class MetricsPanel {
     const hosts = procs.filter((p) => p.role === 'group-host');
     const groups = procs.filter((p) => p.role === 'group');
     const spatial = procs.filter((p) => p.role === 'spatial');
-    const one = (role: string) => procs.find((p) => p.role === role);
+    const one = (role: string) => (role === 'gateway' ? gatewayTotals(procs) : procs.find((p) => p.role === role));
     const sum = (list: ProcessStats[], f: (p: ProcessStats) => number | null) =>
       list.length && list.some((p) => f(p) != null) ? list.reduce((a, p) => a + (f(p) ?? 0), 0) : null;
 
@@ -558,10 +559,12 @@ export class MetricsPanel {
     this.rows.push({ t, v });
     while (this.rows.length && this.rows[0].t < t - WINDOW_MS) this.rows.shift();
 
-    const players = one('gateway')?.players;
+    const gateways = gatewayTotals(procs);
+    const players = gateways?.players;
     this.header.textContent =
       `${Math.round(1000 / this.tickMs())} ticks/s (${this.tickMs()} ms)` +
       ` · ${players ?? '?'} player${players === 1 ? '' : 's'}` +
+      (gateways && gateways.count > 1 ? ` on ${gateways.count} gateways` : '') +
       ` · ${groups.length} Entity Group${groups.length === 1 ? '' : 's'} on ${hosts.length} process${hosts.length === 1 ? '' : 'es'}, ${spatial.length} Spatial Layer Cell${spatial.length === 1 ? '' : 's'}` +
       ` · client ${Math.round(client.fps)} fps`;
     if (this.visible) this.draw();

@@ -22,7 +22,7 @@ pub struct Entity {
 
 There are two sorts:
 
-- **Players' entities** have the player's id, from 1 to 2³¹ - 1, given by the gateway. Your `join` function says where they appear and as what kind. They're removed when the player disconnects.
+- **Players' entities** have the player's id, from 1 to 2³¹ - 1. The orchestrator hands ids to gateways a few at a time, so ids are unique however many gateways run. Your `join` function says where players appear and as what kind. Their entities are removed when they disconnect, or 3 seconds after their gateway stops.
 - **Spawned entities**, like bots, monsters and projectiles, come from `me.spawn(Spawn::new("bot", x, y))`. The orchestrator gives them ids from 2³¹ up and picks their group. `me.despawn()` removes one.
 
 An entity's components move with it to whichever group simulates it next, so keep everything it needs in them: health, cooldowns, AI state, inventory. Visible components are what others see of it; hidden ones never leave its group except in a handoff. [Plugins, components and messages](/Worldmesh/concepts/plugins-and-components/#components) has an example to try.

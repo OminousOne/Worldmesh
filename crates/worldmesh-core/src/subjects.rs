@@ -11,6 +11,9 @@ pub const ASSIGNMENTS: &str = "control.assignments";
 pub const DEBUG_COMMANDS: &str = "control.debug";
 /// Gateway -> orchestrator: a player connected (the orchestrator picks their group).
 pub const JOINS: &str = "control.joins";
+/// Gateways -> orchestrator, about once a second: player ids wanted, and the highest one each
+/// has been given. The orchestrator answers on `gateway_ids_subject`.
+pub const PLAYER_IDS: &str = "control.player_ids";
 /// Groups -> orchestrator: the game spawned entities (the orchestrator gives ids, picks groups).
 pub const SPAWNS: &str = "control.spawns";
 /// Orchestrator or gateway -> groups: spawn, release, leave.
@@ -21,10 +24,8 @@ pub const HOST_COMMANDS: &str = "control.hosts";
 pub const STATS: &str = "control.stats";
 /// Actions for every entity in every group.
 pub const BROADCAST: &str = "group.all.inbox";
-/// Gateway -> every Spatial Layer Cell, every tick: where each connected player is looking.
+/// Each gateway -> every Spatial Layer Cell, every tick: where its players are looking.
 pub const VIEWERS: &str = "spatial.viewers";
-/// Spatial Layer Cells -> gateway, every tick: what each player can see in that cell's area.
-pub const VIEWS: &str = "gateway.views";
 /// Every server process -> gateway, every tick: what it sent and received (debug views only).
 pub const DEBUG_REPORTS: &str = "debug.reports";
 
@@ -57,11 +58,37 @@ pub fn spatial_inbox_subject(spatial: GroupId) -> String {
     format!("spatial.{spatial}.inbox")
 }
 
+/// Spatial Layer Cells -> one gateway, every tick: what each of its players can see in that
+/// cell's area. Each gateway gets only its own players' views.
+pub fn gateway_views_subject(gateway: u32) -> String {
+    format!("gateway.{gateway}.views")
+}
+
+/// Orchestrator -> one gateway: player ids for it to give out.
+pub fn gateway_ids_subject(gateway: u32) -> String {
+    format!("gateway.{gateway}.ids")
+}
+
 /// Spatial Layer Cell ids have this bit set and group ids don't, so a bare id says which it is.
 pub const SPATIAL_ID_BIT: u32 = 0x8000;
 
 pub fn is_spatial_id(id: u32) -> bool {
     id & SPATIAL_ID_BIT != 0
+}
+
+/// A fresh random id for a gateway: any u32 but 0. Gateways can run by the thousand, so they
+/// draw from all 32 bits.
+pub fn random_gateway_id() -> u32 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0),
+    );
+    (h.finish() as u32).max(1)
 }
 
 /// A fresh random id for a group (or, with `spatial`, a Spatial Layer Cell).

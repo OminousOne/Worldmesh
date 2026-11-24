@@ -11,9 +11,9 @@ A world is NATS plus four kinds of process, all from your game's one binary:
 | Orchestrator | Exactly 1 | Starts with `--groups` and `--spatial` in use |
 | Group processes | Any number | Each runs as many Server Entity Groups as the orchestrator asks for |
 | Spatial Layer Cells | Any number | One cell per process. Run a few more than you use, to scale into. |
-| Gateways | 1 or more | Each holds its players' WebSockets. Put them behind a load balancer. |
+| Gateways | Any number, down to one per player | Each holds its players' WebSockets. Put them behind a load balancer. |
 
-Group and cell processes pick their own ids, so you can run any number of identical containers with no configuration. Every process needs the same `NATS_URL` and `TICK_HZ`.
+Group processes, cells and gateways pick their own ids, so you can run any number of identical containers with no configuration. Every process needs the same `NATS_URL` and `TICK_HZ`.
 
 ```sh
 export NATS_URL=nats://nats:4222 TICK_HZ=10

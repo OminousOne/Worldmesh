@@ -11,8 +11,9 @@ use serde_json::Value;
 
 use crate::config::WorldConfig;
 
-/// An entity's id, unique across the world. Players get theirs from the gateway they connect
-/// to; entities the game spawns get theirs from the orchestrator (see [`SPAWNED_ID_START`]).
+/// An entity's id, unique across the world. Both kinds come from the orchestrator: players'
+/// through the gateway they connect to (which asks for a few at a time), and entities the game
+/// spawns directly (see [`SPAWNED_ID_START`]).
 pub type EntityId = u32;
 /// A Server Entity Group's id (or a Spatial Layer Cell's, see [`crate::subjects::is_spatial_id`]).
 pub type GroupId = u32;
@@ -243,7 +244,7 @@ pub struct ProcessStats {
     /// "group" (one Server Entity Group), "group-host" (a process running groups), "spatial",
     /// "gateway", "orchestrator" or "nats".
     pub role: String,
-    /// Group, group process or Spatial Layer Cell id; 0 for the other roles.
+    /// Group, group process, Spatial Layer Cell or gateway id; 0 for the other roles.
     pub id: u32,
     /// CPU use in % of one core (None where it can't be measured).
     pub cpu_pct: Option<f32>,
@@ -341,12 +342,33 @@ pub struct DebugCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinRequest {
     pub id: EntityId,
+    /// The gateway the player is connected to. If it stops, the orchestrator removes its
+    /// players' entities.
+    #[serde(default)]
+    pub gateway: u32,
     pub x: f32,
     pub y: f32,
     pub kind: u16,
     /// Components on top of the kind's.
     #[serde(default)]
     pub parts: Vec<Part>,
+}
+
+/// Gateway -> orchestrator, about once a second: how many player ids it wants (0: none just
+/// now), and the highest id it has ever been given. A restarted orchestrator learns from these
+/// where to carry on from, so it never hands out an id a gateway already has.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlayerIdRequest {
+    pub gateway: u32,
+    pub count: u32,
+    pub above: EntityId,
+}
+
+/// Orchestrator -> one gateway: player ids `first .. first + count`, for it alone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlayerIds {
+    pub first: EntityId,
+    pub count: u32,
 }
 
 /// Group -> orchestrator: the game spawned entities. The orchestrator gives them ids and
@@ -560,9 +582,12 @@ pub struct SenseAnswer {
     pub seen: Vec<Seen>,
 }
 
-/// Gateway -> every Spatial Layer Cell, every tick.
+/// Each gateway -> every Spatial Layer Cell, every tick: its players and where they look.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Viewers {
+    /// Which gateway: cells keep each gateway's players apart and send each its own views.
+    #[serde(default)]
+    pub gateway: u32,
     pub tick: u64,
     pub viewers: Vec<Viewer>,
 }
@@ -591,7 +616,7 @@ pub struct ViewEntity {
     pub parts: Vec<Part>,
 }
 
-/// Spatial Layer Cell -> gateway, every tick.
+/// Spatial Layer Cell -> one gateway, every tick: its players' views of the cell's area.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpatialViews {
     pub spatial: GroupId,

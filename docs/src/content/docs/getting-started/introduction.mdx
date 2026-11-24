@@ -33,7 +33,7 @@ Worldmesh keeps one world and splits the work two ways at once:
 | Server Entity Group | Simulates its entities every tick, delivers actions to them, hands entities to other groups | Yes: your systems and handlers |
 | Spatial Layer Cell | Keeps copies of the entities in its area, answers "what's near me?", routes actions aimed at an area, builds players' views | No |
 | Orchestrator | Decides which groups and cells are in use, who owns which area, and where new entities go | No |
-| Gateway | Holds players' WebSockets, checks their messages against your types, merges their views | Only your `join` function |
+| Gateway | Holds players' WebSockets, checks their messages against your types, merges their views. Run as many as you need, down to one per player. | Only your `join` function |
 | NATS | The bus every process talks over | No |
 
 Every role is the same binary. Your game's `main` calls `worldmesh::run(world)`, and a command-line argument picks the role.

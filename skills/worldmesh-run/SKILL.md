@@ -33,13 +33,16 @@ Logging: `RUST_LOG` (default `info`; `worldmesh=debug` for per-tick detail).
 
 ## Scaling
 
-Manual for now: from the debug panel (Groups +/-, Spatial Layer Cells +/-, or type a number), which sends `{"t":"debug","set_groups":N}` / `set_spatial` to a gateway started with `--allow-debug`. More groups re-split entities (handed off live); more cells re-split the map (nothing handed off; capped by running cell processes). Watch each group's and cell's `load_pct` (share of each tick spent working) in the metrics (M): add groups or cells past about 50%.
+Gateways: run as many as you need behind a load balancer (no configuration; each picks its own id, player ids come from the orchestrator). A stopped gateway's players are removed after 3 s and can reconnect to any other.
+
+Groups and cells: manual for now, from the debug panel (Groups +/-, Spatial Layer Cells +/-, or type a number), which sends `{"t":"debug","set_groups":N}` / `set_spatial` to a gateway started with `--allow-debug`. More groups re-split entities (handed off live); more cells re-split the map (nothing handed off; capped by running cell processes). Watch each group's and cell's `load_pct` (share of each tick spent working) in the metrics (M): add groups or cells past about 50%.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 | --- | --- |
 | Nobody appears; gateway logs nothing after connect | Orchestrator not running, or no group process registered yet (it waits ~3 s at start) |
+| Gateway warns "no player ids from the orchestrator" and turns players away | Orchestrator not running or not reachable on NATS. It also waits 2.5 s after starting before giving out ids |
 | A player vanishes and comes back after ~3 s | Their group died or stalled; the gateway re-joined them. Check that group's log and load |
 | Others stutter, own entity fine | Snapshots arriving late: gateway or cell overloaded, or network. Check cell load and gateway CPU |
 | Own entity corrects (snaps back) often | Inputs arriving late (see the panel's "last input arrived ... late"), or client movement code not bit-identical to the server |

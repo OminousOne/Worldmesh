@@ -27,9 +27,9 @@ use worldmesh_core::protocol::{
     SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
 };
 use worldmesh_core::subjects::{
-    group_inbox_subject, group_senses_subject, random_process_id, spatial_inbox_subject,
-    spatial_reports_subject, ASSIGNMENTS, DEBUG_REPORTS, HEARTBEATS, SPATIAL_ID_BIT, VIEWERS,
-    VIEWS,
+    gateway_views_subject, group_inbox_subject, group_senses_subject, random_process_id,
+    spatial_inbox_subject, spatial_reports_subject, ASSIGNMENTS, DEBUG_REPORTS, HEARTBEATS,
+    SPATIAL_ID_BIT, VIEWERS,
 };
 use worldmesh_core::{bus, stats, time};
 
@@ -64,7 +64,8 @@ pub struct SpatialWorld {
     answered: Vec<SenseDebug>,
     /// What happened in our area, waiting to go into players' views.
     events: Vec<EventAt>,
-    viewers: Vec<Viewer>,
+    /// Where each gateway's players are looking: gateway -> (tick it said so, its players).
+    viewers: BTreeMap<u32, (u64, Vec<Viewer>)>,
     outbox: Vec<(String, Envelope)>,
     bus_log: Vec<BusMsg>,
 }
@@ -81,7 +82,7 @@ impl SpatialWorld {
             queries: Vec::new(),
             answered: Vec::new(),
             events: Vec::new(),
-            viewers: Vec::new(),
+            viewers: BTreeMap::new(),
             outbox: Vec::new(),
             bus_log: Vec::new(),
         }
@@ -138,8 +139,16 @@ impl SpatialWorld {
         self.events.extend(report.events);
     }
 
+    /// One gateway's players. Each gateway's list replaces only its own earlier one.
     pub fn receive_viewers(&mut self, viewers: Viewers) {
-        self.viewers = viewers.viewers;
+        let newer = self
+            .viewers
+            .get(&viewers.gateway)
+            .is_none_or(|(t, _)| viewers.tick >= *t);
+        if newer {
+            self.viewers
+                .insert(viewers.gateway, (viewers.tick, viewers.viewers));
+        }
     }
 
     /// Has every group that's keeping up sent its report for `tick`? A group already more
@@ -297,56 +306,72 @@ impl SpatialWorld {
 
     /// Each player's view of our area: what they can see, always their own entity if we hold
     /// it (so the gateway learns where they went, even after a respawn), what happened there,
-    /// and the questions asked there.
-    pub fn build_views(&mut self, tick: u64) -> SpatialViews {
+    /// and the questions asked there. One message per gateway with players, holding its
+    /// players' views only, sent even when it's empty so the gateway needn't wait for it.
+    pub fn build_views(&mut self, tick: u64) -> Vec<(u32, SpatialViews)> {
+        // A gateway silent for 2 s has stopped: forget its players.
+        self.viewers
+            .retain(|_, (t, _)| *t + time::ticks_in(2000) >= tick);
         let events = std::mem::take(&mut self.events);
         let view = self.config.view;
-        let mut views = Vec::new();
+        let mut out = Vec::new();
         let mut watching = 0;
-        for v in &self.viewers {
-            let overlaps = self.area_in_view(v.x, v.y);
-            let own = self.entities().any(|e| e.id == v.player);
-            let involved = events.iter().any(|ev| ev.involves.contains(&v.player));
-            if !overlaps && !own && !involved {
+        let mut built = 0;
+        for (&gateway, (_, viewers)) in &self.viewers {
+            if viewers.is_empty() {
                 continue;
             }
-            watching += u64::from(overlaps);
-            let entities: Vec<ViewEntity> = self
-                .entities()
-                .filter(|e| e.id == v.player || view.contains(v.x, v.y, e.x, e.y, 1.0))
-                .cloned()
-                .collect();
-            let events: Vec<WireEvent> = events
-                .iter()
-                .filter(|ev| {
-                    ev.involves.contains(&v.player)
-                        || view.contains(v.x, v.y, ev.x, ev.y, EVENT_MARGIN)
-                })
-                .map(|ev| WireEvent {
-                    msg: ev.msg,
-                    body: ev.body.clone(),
-                })
-                .collect();
-            let senses: Vec<SenseDebug> = self
-                .answered
-                .iter()
-                .filter(|s| view.contains(v.x, v.y, s.x, s.y, EVENT_MARGIN))
-                .cloned()
-                .collect();
-            views.push(CellView {
-                player: v.player,
-                entities,
-                events,
-                senses,
-            });
+            let mut views = Vec::new();
+            for v in viewers {
+                let overlaps = self.area_in_view(v.x, v.y);
+                let own = self.entities().any(|e| e.id == v.player);
+                let involved = events.iter().any(|ev| ev.involves.contains(&v.player));
+                if !overlaps && !own && !involved {
+                    continue;
+                }
+                watching += u64::from(overlaps);
+                let entities: Vec<ViewEntity> = self
+                    .entities()
+                    .filter(|e| e.id == v.player || view.contains(v.x, v.y, e.x, e.y, 1.0))
+                    .cloned()
+                    .collect();
+                let events: Vec<WireEvent> = events
+                    .iter()
+                    .filter(|ev| {
+                        ev.involves.contains(&v.player)
+                            || view.contains(v.x, v.y, ev.x, ev.y, EVENT_MARGIN)
+                    })
+                    .map(|ev| WireEvent {
+                        msg: ev.msg,
+                        body: ev.body.clone(),
+                    })
+                    .collect();
+                let senses: Vec<SenseDebug> = self
+                    .answered
+                    .iter()
+                    .filter(|s| view.contains(v.x, v.y, s.x, s.y, EVENT_MARGIN))
+                    .cloned()
+                    .collect();
+                views.push(CellView {
+                    player: v.player,
+                    entities,
+                    events,
+                    senses,
+                });
+            }
+            built += views.len();
+            out.push((
+                gateway,
+                SpatialViews {
+                    spatial: self.spatial_id,
+                    tick,
+                    views,
+                },
+            ));
         }
         stats::VIEWERS.store(watching, Relaxed);
-        stats::VIEWS.fetch_add(views.len() as u64, Relaxed);
-        SpatialViews {
-            spatial: self.spatial_id,
-            tick,
-            views,
-        }
+        stats::VIEWS.fetch_add(built as u64, Relaxed);
+        out
     }
 
     pub fn heartbeat(&self) -> Heartbeat {
@@ -493,14 +518,16 @@ async fn finish_tick(nats: &async_nats::Client, world: &mut SpatialWorld, tick: 
         }
     }
     if world.active {
-        let views = world.build_views(tick);
+        let per_gateway = world.build_views(tick);
         streams.push(StreamMsg {
             from: id,
-            to: 0,
+            to: 0, // gateways
             kind: StreamKind::View,
-            n: views.views.len() as u32,
+            n: per_gateway.iter().map(|(_, v)| v.views.len() as u32).sum(),
         });
-        bus::publish(nats, VIEWS.to_string(), &views).await;
+        for (gateway, views) in per_gateway {
+            bus::publish(nats, gateway_views_subject(gateway), &views).await;
+        }
     }
     bus::publish(
         nats,
@@ -823,6 +850,7 @@ mod tests {
             vec![],
         ));
         s.receive_viewers(Viewers {
+            gateway: 1,
             tick: 1000,
             viewers: vec![
                 Viewer {
@@ -837,7 +865,7 @@ mod tests {
                 },
             ],
         });
-        let views = s.build_views(1000);
+        let views = only(s.build_views(1000));
         assert_eq!(
             views.views.len(),
             1,
@@ -850,6 +878,7 @@ mod tests {
         // After a respawn far away (still in our area), the player is in their own view.
         s.receive_report(report(1, 1001, vec![entity(2, 2.0, 2.0)], vec![]));
         s.receive_viewers(Viewers {
+            gateway: 1,
             tick: 1001,
             viewers: vec![Viewer {
                 player: 2,
@@ -857,7 +886,7 @@ mod tests {
                 y: 60.0,
             }],
         });
-        let views = s.build_views(1001);
+        let views = only(s.build_views(1001));
         assert!(views.views[0].entities.iter().any(|e| e.id == 2));
     }
 
@@ -881,6 +910,7 @@ mod tests {
         });
         s.receive_report(r);
         s.receive_viewers(Viewers {
+            gateway: 1,
             tick: 1000,
             viewers: vec![
                 Viewer {
@@ -895,7 +925,7 @@ mod tests {
                 },
             ],
         });
-        let views = s.build_views(1000);
+        let views = only(s.build_views(1000));
         let counts: Vec<(u32, usize)> = views
             .views
             .iter()
@@ -906,6 +936,87 @@ mod tests {
             vec![(7, 2), (8, 1)],
             "8 can't see it but was involved in the second one"
         );
+    }
+
+    /// The one gateway's views.
+    fn only(mut per_gateway: Vec<(u32, SpatialViews)>) -> SpatialViews {
+        assert_eq!(per_gateway.len(), 1);
+        per_gateway.pop().unwrap().1
+    }
+
+    fn viewer(player: u32, x: f32, y: f32) -> Viewer {
+        Viewer { player, x, y }
+    }
+
+    #[test]
+    fn each_gateway_gets_only_its_own_players_views() {
+        let mut s = cell();
+        s.receive_report(report(
+            1,
+            1000,
+            vec![entity(2, 20.0, 20.0), entity(3, 21.0, 21.0)],
+            vec![],
+        ));
+        // Two gateways, one player each, both looking at our area.
+        s.receive_viewers(Viewers {
+            gateway: 10,
+            tick: 1000,
+            viewers: vec![viewer(2, 20.0, 20.0)],
+        });
+        s.receive_viewers(Viewers {
+            gateway: 20,
+            tick: 1000,
+            viewers: vec![viewer(3, 21.0, 21.0)],
+        });
+        let per_gateway = s.build_views(1000);
+        let players: Vec<(u32, Vec<u32>)> = per_gateway
+            .iter()
+            .map(|(g, v)| (*g, v.views.iter().map(|c| c.player).collect()))
+            .collect();
+        assert_eq!(players, vec![(10, vec![2]), (20, vec![3])]);
+        // Each still sees both entities.
+        for (_, v) in &per_gateway {
+            assert_eq!(v.views[0].entities.len(), 2);
+        }
+
+        // A newer list from one gateway replaces only its own.
+        s.receive_viewers(Viewers {
+            gateway: 10,
+            tick: 1001,
+            viewers: vec![viewer(4, 20.0, 20.0)],
+        });
+        let players: Vec<Vec<u32>> = s
+            .build_views(1001)
+            .iter()
+            .map(|(_, v)| v.views.iter().map(|c| c.player).collect())
+            .collect();
+        assert_eq!(players, vec![vec![4], vec![3]]);
+    }
+
+    #[test]
+    fn a_gateway_with_players_elsewhere_still_hears_back_and_a_silent_one_is_forgotten() {
+        let mut s = cell();
+        s.receive_report(report(1, 1000, vec![entity(2, 20.0, 20.0)], vec![]));
+        // Its only player is far from our area: an empty message, so it needn't wait for us.
+        s.receive_viewers(Viewers {
+            gateway: 10,
+            tick: 1000,
+            viewers: vec![viewer(9, 140.0, 140.0)],
+        });
+        // No players at all: nothing to send.
+        s.receive_viewers(Viewers {
+            gateway: 20,
+            tick: 1000,
+            viewers: vec![],
+        });
+        let per_gateway = s.build_views(1000);
+        assert_eq!(per_gateway.len(), 1);
+        assert_eq!(per_gateway[0].0, 10);
+        assert!(per_gateway[0].1.views.is_empty());
+
+        // Two seconds without a word from gateway 10: its players are forgotten.
+        let later = 1000 + time::ticks_in(2000) + 1;
+        assert!(s.build_views(later).is_empty());
     }
 
     #[test]

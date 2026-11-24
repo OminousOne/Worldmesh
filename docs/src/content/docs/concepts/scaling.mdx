@@ -12,6 +12,8 @@ Two numbers set a world's capacity, and both can change while it runs:
 
 You set both by hand for now: `--groups` and `--spatial` on the orchestrator at start, then live from the [debug panel](/Worldmesh/guides/debug-panel/). Automatic scaling, from the load every process already reports, is on the roadmap.
 
+Connections scale separately: start more gateways, down to one per player. Each finds the others' work through the bus, with no configuration. See [Gateways](/Worldmesh/concepts/architecture/#gateways).
+
 Try both. This is the orchestrator's own splitting logic, running on 130 entities:
 
 <ChunkMap mode="scaling" groups={3} cells={3} />
@@ -44,6 +46,6 @@ Cells own equal runs of chunks along a Hilbert curve, so each cell's area is com
 
 - A **group** that sends no heartbeat for 3 seconds is dropped, and its entities with it. Its players are placed again: the gateway re-joins a player missing from their own view for 3 seconds.
 - A **cell** that stops is dropped, and its area is re-split among the rest.
-- A **gateway** keeps nothing but connections, so its players reconnect.
+- A **gateway** that stops is noticed within 3 seconds, and the orchestrator removes its players' entities. They reconnect, through it or any other gateway.
 
 There's no persistence yet, so a dead group's bots and monsters don't come back.

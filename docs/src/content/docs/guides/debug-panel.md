@@ -32,6 +32,8 @@ The scaling and lag controls only work when the gateway runs with `--allow-debug
 | Metrics | CPU, memory, traffic and load per process, over the last minute |
 | Bus traffic | Every process around NATS, messages moving between them, recent actions traced hop by hop |
 
+With several gateways, the panel adds up their numbers and draws them as one in the bus view.
+
 Add your own sections with `panel.addSection(title)`, which returns an element to fill. The medieval example puts its bot controls there.
 
 ## Keys

@@ -11,7 +11,7 @@
 //! The gateway runs no game code but the world's join function. Components and events pass
 //! through as bytes (decoded to JSON, by name, only for players who asked for JSON snapshots).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -31,12 +31,12 @@ use crate::snapshot::Encoder;
 use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
     Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, GroupCommand, GroupCommandKind,
-    JoinRequest, Kind, ProcessStats, SenseDebug, ServerMsg, SnapshotEntity, SpatialViews,
-    StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
+    JoinRequest, Kind, PlayerIdRequest, PlayerIds, ProcessStats, SenseDebug, ServerMsg,
+    SnapshotEntity, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
 };
 use worldmesh_core::subjects::{
-    entity_subject, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, STATS,
-    VIEWERS, VIEWS,
+    entity_subject, gateway_ids_subject, gateway_views_subject, random_gateway_id, ASSIGNMENTS,
+    DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, PLAYER_IDS, STATS, VIEWERS,
 };
 use worldmesh_sim::world::Rules;
 pub mod snapshot;
@@ -51,6 +51,70 @@ const MERGE_TIMEOUT: Duration = Duration::from_millis(60);
 const REJOIN_AFTER_CHECKS: u32 = 3;
 /// Inputs may be scheduled at most this far ahead.
 const MAX_INPUT_LEAD_MS: u64 = 5000;
+/// With fewer player ids than this left, ask the orchestrator for more...
+const IDS_LOW: usize = 16;
+/// ...this many at a time.
+const IDS_BLOCK: u32 = 32;
+/// How long a connecting player waits for an id (only without an orchestrator) before the
+/// gateway gives up on them.
+const ID_WAIT: Duration = Duration::from_secs(5);
+
+/// Player ids from the orchestrator, waiting for players to connect. Every gateway gets its
+/// own, so any number of gateways can run at once without two giving out the same id.
+#[derive(Default)]
+struct IdPool {
+    ids: Mutex<VecDeque<EntityId>>,
+    /// The highest id we've been given. We tell the orchestrator, so even a restarted one
+    /// never gives anyone those again.
+    highest: AtomicU32,
+    arrived: Notify,
+    /// Running low: ask now, not at the next once-a-second round.
+    low: Notify,
+}
+
+impl IdPool {
+    fn add(&self, ids: PlayerIds) {
+        if ids.count == 0 {
+            return;
+        }
+        let last = ids.first.saturating_add(ids.count - 1);
+        self.ids.lock().unwrap().extend(ids.first..=last);
+        self.highest.fetch_max(last, Ordering::Relaxed);
+        self.arrived.notify_waiters();
+    }
+
+    /// How many to ask for: a block when running low, otherwise none.
+    fn wanted(&self) -> u32 {
+        if self.ids.lock().unwrap().len() < IDS_LOW {
+            IDS_BLOCK
+        } else {
+            0
+        }
+    }
+
+    /// The next id for a connecting player, waiting for one if need be.
+    async fn take(&self) -> Option<EntityId> {
+        let deadline = tokio::time::Instant::now() + ID_WAIT;
+        loop {
+            let arrived = self.arrived.notified();
+            tokio::pin!(arrived);
+            arrived.as_mut().enable();
+            let (id, left) = {
+                let mut ids = self.ids.lock().unwrap();
+                (ids.pop_front(), ids.len())
+            };
+            if left < IDS_LOW {
+                self.low.notify_one();
+            }
+            if id.is_some() {
+                return id;
+            }
+            if tokio::time::timeout_at(deadline, arrived).await.is_err() {
+                return None;
+            }
+        }
+    }
+}
 
 /// How a gateway runs.
 #[derive(Debug, Clone)]
@@ -94,7 +158,9 @@ struct AppState {
     options: GatewayOptions,
     /// Encoded messages for every player (assignment changes and stats).
     out: broadcast::Sender<Bytes>,
-    next_id: Arc<AtomicU32>,
+    /// This gateway's id: random, so any number can run.
+    gateway: u32,
+    ids: Arc<IdPool>,
     /// Latest encoded assignment, sent to players as they connect.
     ownership: Arc<Mutex<Option<Bytes>>>,
     clients: Arc<Mutex<BTreeMap<EntityId, Client>>>,
@@ -107,6 +173,7 @@ pub async fn run(
     options: GatewayOptions,
 ) -> Result<()> {
     let config = rules.config;
+    let gateway_id = random_gateway_id();
     let (out, _) = broadcast::channel::<Bytes>(64);
     let ownership = Arc::new(Mutex::new(None::<Bytes>));
     let clients: Arc<Mutex<BTreeMap<EntityId, Client>>> = Arc::default();
@@ -114,13 +181,57 @@ pub async fn run(
     // Each Spatial Layer Cell's latest views; wake the merge loop when some arrive.
     let latest: Arc<Mutex<BTreeMap<u32, SpatialViews>>> = Arc::default();
     let arrived = Arc::new(Notify::new());
-    let mut views = bus::subscribe::<SpatialViews>(&nats, VIEWS).await?;
+    let mut views =
+        bus::subscribe::<SpatialViews>(&nats, &gateway_views_subject(gateway_id)).await?;
     {
         let (latest, arrived) = (latest.clone(), arrived.clone());
         tokio::spawn(async move {
             while let Some(v) = views.recv().await {
                 latest.lock().unwrap().insert(v.spatial, v);
                 arrived.notify_one();
+            }
+        });
+    }
+
+    // Player ids: whatever the orchestrator sends us, and once a second (or when running low)
+    // what we want and the highest we hold.
+    let ids = Arc::new(IdPool::default());
+    let mut ids_in = bus::subscribe::<PlayerIds>(&nats, &gateway_ids_subject(gateway_id)).await?;
+    {
+        let ids = ids.clone();
+        tokio::spawn(async move {
+            while let Some(block) = ids_in.recv().await {
+                ids.add(block);
+            }
+        });
+    }
+    {
+        let (ids, nats) = (ids.clone(), nats.clone());
+        tokio::spawn(async move {
+            let mut every_second = tokio::time::interval(Duration::from_secs(1));
+            let mut asked: Option<Instant> = None;
+            loop {
+                let low = tokio::select! {
+                    _ = every_second.tick() => false,
+                    _ = ids.low.notified() => true,
+                };
+                let count = ids.wanted();
+                // When running low, ask at once, but not again before the answer is back.
+                if low
+                    && (count == 0
+                        || asked.is_some_and(|t| t.elapsed() < Duration::from_millis(500)))
+                {
+                    continue;
+                }
+                if count > 0 {
+                    asked = Some(Instant::now());
+                }
+                let request = PlayerIdRequest {
+                    gateway: gateway_id,
+                    count,
+                    above: ids.highest.load(Ordering::Relaxed),
+                };
+                bus::publish(&nats, PLAYER_IDS.to_string(), &request).await;
             }
         });
     }
@@ -164,7 +275,7 @@ pub async fn run(
     }
 
     // Every process's latest stats; once a second, add NATS's own and send them all to players.
-    stats::spawn_reporter(nats.clone(), "gateway", 0);
+    stats::spawn_reporter(nats.clone(), "gateway", gateway_id);
     let mut stats_in = bus::subscribe::<ProcessStats>(&nats, STATS).await?;
     {
         let out = out.clone();
@@ -228,6 +339,7 @@ pub async fn run(
                     &nats,
                     VIEWERS.to_string(),
                     &Viewers {
+                        gateway: gateway_id,
                         tick,
                         viewers: viewers.clone(),
                     },
@@ -333,7 +445,8 @@ pub async fn run(
         config,
         options: options.clone(),
         out,
-        next_id: Arc::new(AtomicU32::new(1)),
+        gateway: gateway_id,
+        ids,
         ownership,
         clients,
     };
@@ -344,7 +457,7 @@ pub async fn run(
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&options.listen).await?;
-    info!(listen = %options.listen, "gateway listening");
+    info!(gateway = format!("{gateway_id:08x}"), listen = %options.listen, "gateway listening");
     axum::serve(listener, app).await?;
     Ok(())
 }
@@ -404,11 +517,12 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 
 /// Where and as what the world's join function puts a joining player, as a join request for
 /// the orchestrator.
-fn join_request(rules: &Rules, id: EntityId) -> Option<JoinRequest> {
+fn join_request(rules: &Rules, gateway: u32, id: EntityId) -> Option<JoinRequest> {
     let spawn = rules.join(id);
     let (kind, parts) = rules.encode_spawn(&spawn)?;
     Some(JoinRequest {
         id,
+        gateway,
         x: spawn.x,
         y: spawn.y,
         kind,
@@ -417,7 +531,10 @@ fn join_request(rules: &Rules, id: EntityId) -> Option<JoinRequest> {
 }
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
-    let id = state.next_id.fetch_add(1, Ordering::Relaxed);
+    let Some(id) = state.ids.take().await else {
+        warn!("no player ids from the orchestrator for 5 s: is it running? Turning a player away");
+        return;
+    };
     let (mut sender, mut receiver) = socket.split();
 
     let welcome = ServerMsg::Welcome {
@@ -443,7 +560,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         }
     }
 
-    let Some(join) = join_request(&state.rules, id) else {
+    let Some(join) = join_request(&state.rules, state.gateway, id) else {
         warn!(id, "the world's join function gave an unknown kind, or a component that couldn't be encoded");
         return;
     };
@@ -498,7 +615,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 missing_checks = if present { 0 } else { missing_checks + 1 };
                 if missing_checks >= REJOIN_AFTER_CHECKS {
                     warn!(id, "player missing from their own view, re-joining");
-                    if let Some(join) = join_request(&state.rules, id) {
+                    if let Some(join) = join_request(&state.rules, state.gateway, id) {
                         bus::publish(&state.nats, JOINS.to_string(), &join).await;
                     }
                     missing_checks = 0;
@@ -783,7 +900,7 @@ mod tests {
     #[test]
     fn a_join_uses_the_worlds_join_function() {
         let rules = test_game::rules();
-        let join = join_request(&rules, 3).unwrap();
+        let join = join_request(&rules, 1, 3).unwrap();
         assert_eq!(
             (join.id, join.x, join.y, rules.kind_name(join.kind)),
             (3, 10.5, 10.5, "unit")

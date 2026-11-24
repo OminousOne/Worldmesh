@@ -64,6 +64,9 @@ impl Seen {
     }
 }
 
+/// The one gateway every TestWorld player is connected to.
+const GATEWAY: u32 = 1;
+
 /// A whole world in one process. See the [module docs](self).
 pub struct TestWorld {
     rules: Arc<Rules>,
@@ -330,7 +333,8 @@ impl TestWorld {
             self.place(group, e);
         }
 
-        // Where players are looking: at their own entity, as the gateway does.
+        // Where players are looking: at their own entity, as the gateway does. One gateway
+        // holds every player here.
         let viewers: Vec<Viewer> = self
             .viewers
             .iter()
@@ -346,11 +350,13 @@ impl TestWorld {
         let mut answers = Vec::new();
         for c in self.cells.values_mut() {
             c.receive_viewers(Viewers {
+                gateway: GATEWAY,
                 tick,
                 viewers: viewers.clone(),
             });
             answers.extend(c.answer(tick));
-            self.views.push(c.build_views(tick));
+            self.views
+                .extend(c.build_views(tick).into_iter().map(|(_, views)| views));
         }
         for (group, a) in answers {
             if let Some(g) = self.groups.get_mut(&group) {
