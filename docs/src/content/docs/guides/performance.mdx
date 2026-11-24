@@ -21,21 +21,21 @@ These numbers come from the medieval example: 3,000 aggressive bots fighting on 
   title="Bus traffic in the 3,000-bot fight"
   unit="MB/s"
   rows={[
-    { label: 'Answers to "what\'s near me?"', value: 41, highlight: 'hot' },
+    { label: 'Spatial query results', value: 41, highlight: 'hot' },
     { label: 'Reports, groups to cells', value: 2.0 },
     { label: 'Views, cells to gateway', value: 1.3 },
     { label: 'Actions, inputs and handoffs', value: 0.1 },
   ]}
 />
 
-Almost all of it is answers to "what's near me?". Every aggressive bot asks every 200 ms, and an answer lists everyone in the circle. In a crowd of thousands, that's thousands of entities per answer.
+Almost all of it is spatial query results. Every aggressive bot queries every 200 ms, and the results list everyone in the circle. In a crowd of thousands, that's thousands of entities per query.
 
 The fix is in your game, because only your game knows what an entity needs to know:
 
 - **Ask only for the components you'll read**: `Query::within(r).with::<Dead>()`. The medieval bots only need to know who's dead. Asking for that alone, instead of every visible component, cut the whole bus by about 40% (see below).
-- **Ask about fewer entities**: `.nearest(n)` gets only the closest few, and `.target(id)` always includes the one you care about.
-- **Ask less often**, or only when something changed. A bot that was just hit already knows where the attacker is.
-- **Make visible only what others need.** Visible components are in every answer that asks for them and in every player's view. Field names count too: components are MessagePack with named fields, so `{"until":1234}` spends 6 bytes on the name and 3 on the value.
+- **Ask for fewer entities**: `.nearest(n)` gets only the closest few, and `.target(id)` always includes the one you care about.
+- **Query less often**, or only when something changed. A bot that was just hit already knows where the attacker is.
+- **Make visible only what others need.** Visible components are in every query result that asks for them and in every player's view. Field names count too: components are MessagePack with named fields, so `{"until":1234}` spends 6 bytes on the name and 3 on the value.
 
 <Bars
   title="Total bus traffic, by what the bots ask for"
@@ -60,7 +60,7 @@ What a player receives depends on how much is in their view and how much of it c
 | Setting | Effect |
 | --- | --- |
 | More groups | Splits the simulation. Each group's load drops roughly in proportion. Adds a little report traffic. |
-| More cells | Splits questions and view building. Questions near a border go to two cells. |
+| More cells | Splits view building and spatial queries. Queries near a border go to two cells. |
 | More NATS servers | Spreads connections and traffic: each message goes only to the servers with a subscriber for it. |
 | `chunk_size` | Smaller chunks split areas more evenly but cost more bookkeeping. 8 tiles is a good start. |
 | `TICK_HZ` | Higher is smoother and more responsive, and multiplies every per-tick cost. |

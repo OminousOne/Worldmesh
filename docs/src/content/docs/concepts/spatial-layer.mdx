@@ -1,0 +1,49 @@
+---
+title: The spatial layer
+description: What Spatial Layer Cells are, why Worldmesh needs them, and the four things they do every tick.
+---
+
+import ChunkMap from '../../../components/diagrams/ChunkMap.astro';
+import SpatialJobs from '../../../components/diagrams/SpatialJobs.astro';
+
+The spatial layer is Worldmesh's map of where everything is. It's made of Spatial Layer Cells: each owns part of the map and keeps track of every entity standing in it, whichever server simulates that entity. Cells simulate nothing and run no game code.
+
+## Why it's needed
+
+Server Entity Groups are split by entity count, not by area. That keeps them balanced (a crowd in one town spreads over several groups), but it means a group's entities are scattered over the whole map, and any spot can hold entities from several groups at once.
+
+<ChunkMap mode="pair" groups={3} cells={3} />
+
+So each group knows exactly where its own entities are, and nothing about anyone else's. Anything that depends on who is standing where, across every group, needs another view of the world, split by area. That's the spatial layer.
+
+## How a cell knows who's in its area
+
+Every tick, each group sends each cell a report of its entities standing in that cell's area: position, kind and visible components, plus what happened there and any spatial queries asked from there. Gateways tell every cell where their players are looking.
+
+From these, a cell has a copy of everyone in its area. It keeps nothing else between ticks: it rebuilds its picture from the latest reports every tick. That's why moving an area from one cell to another hands nothing off.
+
+## What it does with it
+
+<SpatialJobs />
+
+### Players' views
+
+For each player whose view overlaps its area, a cell lists the entities they can see there, with their visible components. The player's gateway merges the parts from every cell into one snapshot.
+
+This is what lets a player see everyone around them, straight across server borders: the entities in a view can be simulated by any number of groups, and the cells have them all.
+
+### Events
+
+When game code emits an event (`me.emit`, `me.emit_at`), the group reports it to the cell where it happened, and the cell puts it in the views of the players who can see that spot. `me.emit_involving` also sends it to the named players, wherever they are.
+
+### Area actions
+
+An action sent to a circle, like an explosion (`me.send(To::Area { x, y, r }, Hit)`), goes to the cells covering that circle. Each passes it on to every group with an entity inside it, and those groups deliver it on the next tick. The sender doesn't need to know who's there, or where they're simulated.
+
+### Spatial queries
+
+A spatial query asks which entities are within a radius of an entity, in any group: `me.query(6.0)`. The cells covering the circle answer before the group's next tick, and the results are there on the next tick with `me.sensed()`. Bots and monsters use them to find targets. See [Spatial queries](/Worldmesh/concepts/spatial-queries/).
+
+## Scaling it
+
+Each cell owns an equal run of chunks (squares `chunk_size` tiles wide) along a Hilbert curve, so its area is compact. Add cells to split the map further, and the load with it: views, events, area actions and queries are all split by area. Nothing is handed off when cells are added or removed. See [Scaling and handoffs](/Worldmesh/concepts/scaling/).

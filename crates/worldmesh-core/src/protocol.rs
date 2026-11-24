@@ -149,7 +149,7 @@ pub struct SnapshotEntity {
 
 // ---- Debug ----
 
-/// A "what's near me?" question, as drawn by the debug overlay.
+/// A spatial query, as drawn by the debug overlay.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SenseDebug {
     /// The entity that asked.
@@ -205,7 +205,7 @@ pub struct StreamMsg {
 pub enum StreamKind {
     /// Group -> Spatial Layer Cell: its entities in that area (n), plus questions and events.
     Report,
-    /// Spatial Layer Cell -> group: answers to "what's near me?" (n).
+    /// Spatial Layer Cell -> group: spatial query results (n).
     Senses,
     /// Spatial Layer Cell -> gateway: players' views (n).
     View,
@@ -279,7 +279,7 @@ pub struct ProcessStats {
     /// Entities handed off per second.
     #[serde(default)]
     pub handoffs: f32,
-    /// "What's near me?" questions per second (group: asked; Spatial Layer Cell: answered).
+    /// Spatial queries per second (group: made; Spatial Layer Cell: answered).
     #[serde(default)]
     pub queries: f32,
     /// Spatial Layer Cell: player views built, and area actions passed on, per second.
@@ -529,7 +529,7 @@ pub struct GroupReport {
     /// Every entity of this group standing in the cell's area, as of `tick`. Replaces what the
     /// cell had from this group, so an entity that walked out simply isn't listed.
     pub entities: Vec<Reported>,
-    /// "What's near me?" questions whose circle touches the cell's area.
+    /// Spatial queries whose circle touches the cell's area.
     #[serde(default)]
     pub queries: Vec<SenseQuery>,
     /// What happened in the cell's area, for the players watching it.

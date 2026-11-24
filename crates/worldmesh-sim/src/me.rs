@@ -1,7 +1,7 @@
 //! `Me`: the entity being simulated, and everything game code can do from it.
 //!
 //! Game code only ever changes the entity it runs for. Everything else it learns by reading
-//! (its own group's entities exactly, others from "what's near me?" answers, both limited to
+//! (its own group's entities exactly, others from spatial query results, both limited to
 //! visible components) and changes by sending actions, which land on the next tick wherever
 //! the target is. That keeps a game behaving the same however its entities are split between
 //! groups.
@@ -53,7 +53,8 @@ pub struct Incoming {
     pub trace: u64,
 }
 
-/// A "what's near me?" question. `me.query(6.0)` is the same as `me.query(Query::within(6.0))`.
+/// A spatial query: which entities are within a radius, in any group. `me.query(6.0)` is the
+/// same as `me.query(Query::within(6.0))`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     r: f32,

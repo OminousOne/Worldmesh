@@ -74,7 +74,7 @@ export type ProcessStats = {
   bus_kinds?: [string, number][];
 };
 
-/** A "what's near me?" question, for the debug overlay. */
+/** A spatial query, for the debug overlay. */
 export type SenseDebug = { id: EntityId; x: number; y: number; r: number; found: number; spatial: ProcessId[] };
 
 /** One envelope that crossed the bus (debug). */

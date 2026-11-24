@@ -26,7 +26,7 @@ The scaling and lag controls only work when the gateway runs with `--allow-debug
 | Section | What's there |
 | --- | --- |
 | Server Entity Groups | Groups in use (type any number), entities per group, regroup by position, fake lag for one group |
-| Spatial Layer Cells | Cells in use, entities and players per cell, questions per second |
+| Spatial Layer Cells | Cells in use, entities and players per cell, spatial queries per second |
 | Network | Compact or JSON snapshots, MessagePack or JSON on the bus, bytes per second each way |
 | Prediction | On or off, how far ahead you run, how early your last input arrived, corrections |
 | Metrics | CPU, memory, traffic and load per process, over the last minute |
@@ -42,7 +42,7 @@ Add your own sections with `panel.addSection(title)`, which returns an element t
 | --- | --- |
 | <kbd>O</kbd> | Color entities by group |
 | <kbd>L</kbd> | Spatial Layer Cell areas |
-| <kbd>N</kbd> | "What's near me?" questions |
+| <kbd>N</kbd> | Spatial queries |
 | <kbd>V</kbd> | Your view, on a minimap |
 | <kbd>G</kbd> | Raw server positions (ghosts) |
 | <kbd>P</kbd> | Prediction |
@@ -57,7 +57,7 @@ The panel doesn't draw on your world; your renderer does. The panel keeps the ov
 
 For colors and names that match its legends, use `panel.groupColor(id)`, `panel.groupName(id)`, `panel.spatialName(id)` and `panel.short(id)`. `panel.minimap` is a canvas shown while the view overlay is on.
 
-The data comes from the client: `entity.state.group` and `.spatial`, `client.assignment` (which cell owns each chunk), the `senses` in each snapshot (the questions asked, while debug traffic is on), and the client's `handoff` handler.
+The data comes from the client: `entity.state.group` and `.spatial`, `client.assignment` (which cell owns each chunk), the `senses` in each snapshot (the spatial queries made, while debug traffic is on), and the client's `handoff` handler.
 
 ## Tracing actions
 

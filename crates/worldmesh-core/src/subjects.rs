@@ -42,7 +42,7 @@ pub fn group_inbox_subject(group: GroupId) -> String {
     format!("group.{group}.inbox")
 }
 
-/// Spatial Layer Cells -> one group: answers to its entities' "what's near me?".
+/// Spatial Layer Cells -> one group: results of its entities' spatial queries.
 pub fn group_senses_subject(group: GroupId) -> String {
     format!("group.{group}.senses")
 }

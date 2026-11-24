@@ -41,7 +41,7 @@ use worldmesh_core::{bus, stats, time};
 
 /// How long the old group keeps forwarding envelopes for an entity it handed off.
 const FORWARD_FOR_MS: u64 = 1000;
-/// An entity forgets an answer to "what's near me?" this old.
+/// An entity forgets spatial query results this old.
 const SENSE_TTL_MS: u64 = 1000;
 /// Ticks of position history kept per entity (for [`Me::position_at`]).
 const TRAIL_TICKS: usize = 20;
@@ -71,7 +71,7 @@ pub struct Counters {
     pub ticks: u64,
 }
 
-/// One entity's latest answer to "what's near me?": (tick of the positions, what it saw).
+/// One entity's latest spatial query results: (tick of the positions, what it saw).
 type SenseRound = (u64, Vec<Seen>);
 
 /// One Server Entity Group's world: its entities and everything in flight for them.
@@ -90,7 +90,7 @@ pub struct GroupWorld {
     left: BTreeSet<EntityId>,
     /// Entities handed off recently: (new group, until this tick). Envelopes for them are forwarded.
     moved: BTreeMap<EntityId, (GroupId, u64)>,
-    /// Each entity's latest answer to "what's near me?": (tick of the positions, what it saw).
+    /// Each entity's latest spatial query results: (tick of the positions, what it saw).
     senses: BTreeMap<EntityId, SenseRound>,
     /// Questions asked this tick, sent with the reports.
     queries: Vec<SenseQuery>,

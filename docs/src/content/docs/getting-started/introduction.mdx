@@ -22,7 +22,7 @@ One server runs out of room long before a big world does. The usual workarounds 
 Worldmesh keeps one world and splits the work two ways at once:
 
 - **By entity.** Each entity is simulated by exactly one **Server Entity Group**, wherever it stands. Groups are balanced by entity count, so a crowd in one town spreads over as many groups as it needs.
-- **By area.** Each **Spatial Layer Cell** owns part of the map and answers "what's near here?" from copies of the entities in it. Cells simulate nothing, so moving an area from one cell to another is cheap.
+- **By area.** Each **Spatial Layer Cell** owns part of the map and keeps a copy of every entity in it, from reports the groups send every tick. From those it builds players' views, routes actions aimed at an area, and answers spatial queries. Cells simulate nothing, so moving an area from one cell to another is cheap.
 
 <ChunkMap mode="pair" groups={3} cells={3} />
 
@@ -31,7 +31,7 @@ Worldmesh keeps one world and splits the work two ways at once:
 | Piece | What it does | Runs your code? |
 | --- | --- | --- |
 | Server Entity Group | Simulates its entities every tick, delivers actions to them, hands entities to other groups | Yes: your systems and handlers |
-| Spatial Layer Cell | Keeps copies of the entities in its area, answers "what's near me?", routes actions aimed at an area, builds players' views | No |
+| Spatial Layer Cell | Keeps a copy of every entity in its area. Builds players' views, delivers events, routes actions aimed at an area, and answers spatial queries. | No |
 | Orchestrator | Decides which groups and cells are in use, who owns which area, and where new entities go | No |
 | Gateway | Holds players' WebSockets, checks their messages against your types, merges their views. Run as many as you need, down to one per player. | Only your `join` function |
 | NATS | The bus every process talks over: one server, or a cluster of as many as you need | No |

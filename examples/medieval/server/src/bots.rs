@@ -1,5 +1,5 @@
 //! Bots: the [`Bots`] plugin. Bot AI runs in whichever group simulates the bot. A bot knows
-//! its own group's units exactly and everyone else from its latest "what's near me?" answer
+//! its own group's units exactly and everyone else from its latest spatial query results
 //! (a tick or two old), and fights exactly like a player does: through
 //! [`combat::use_ability`]. Its randomness is seeded by (world, bot, tick), so moving to
 //! another group never changes what it decides.

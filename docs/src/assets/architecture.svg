@@ -45,9 +45,9 @@
   <rect x="280" y="252" width="200" height="120" rx="12" fill="#0f3644" stroke="#9be000" stroke-width="2"/>
   <rect x="296" y="252" width="168" height="6" rx="3" fill="#9be000"/>
   <text x="380" y="282" text-anchor="middle" fill="#ffffff" font-weight="700">Spatial Layer Cells</text>
-  <text x="380" y="300" text-anchor="middle" fill="#9fb9c3" font-size="11">own areas, answer</text>
-  <text x="380" y="315" text-anchor="middle" fill="#9fb9c3" font-size="11">"what's near me?"</text>
-  <text x="380" y="330" text-anchor="middle" fill="#9fb9c3" font-size="11">build players' views</text>
+  <text x="380" y="300" text-anchor="middle" fill="#9fb9c3" font-size="11">track who is where</text>
+  <text x="380" y="315" text-anchor="middle" fill="#9fb9c3" font-size="11">build players' views</text>
+  <text x="380" y="330" text-anchor="middle" fill="#9fb9c3" font-size="11">area actions, spatial queries</text>
   <rect x="331" y="342" width="20" height="20" rx="5" fill="#9be000" stroke="#0f3644" stroke-width="2"/>
   <rect x="370" y="342" width="20" height="20" rx="5" fill="#9be000" stroke="#0f3644" stroke-width="2"/>
   <rect x="409" y="342" width="20" height="20" rx="5" fill="#9be000" stroke="#0f3644" stroke-width="2"/>

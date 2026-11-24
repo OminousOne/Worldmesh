@@ -75,13 +75,13 @@ const steps = [
     role: 'group',
     title: 'Reports go to the cells',
     when: 'a few ms in',
-    body: "Each group sends every cell a report of its entities in that cell's area: positions, kinds, visible components, and any \"what's near me?\" questions. Each gateway tells every cell where its players are looking.",
+    body: "Each group sends every cell a report of its entities in that cell's area: positions, kinds, visible components, events, and any spatial queries. Each gateway tells every cell where its players are looking.",
   },
   {
     role: 'cell',
     title: 'Cells answer and build views',
     when: 'once every report is in',
-    body: "With every group's report in (or after 40 ms), a cell answers the questions, passes area actions on to the groups with entities in range, and builds each player's view of its area. Each gateway gets only its own players' views.",
+    body: "With every group's report in (or after 40 ms), a cell answers the spatial queries, passes area actions on to the groups with entities in range, and builds each player's view of its area. Each gateway gets only its own players' views.",
   },
   {
     role: 'gateway',
@@ -93,7 +93,7 @@ const steps = [
     role: 'group',
     title: 'Ready for the next tick',
     when: '100 ms',
-    body: 'Actions sent this tick, and the answers to its questions, are waiting in the groups. Tick n + 1 delivers them, wherever their targets are.',
+    body: 'Actions sent this tick, and its spatial query results, are waiting in the groups. Tick n + 1 delivers them, wherever their targets are.',
   },
 ];
 ---

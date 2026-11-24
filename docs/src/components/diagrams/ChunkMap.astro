@@ -1,7 +1,7 @@
 ---
 // A 64 x 64 tile world in 8-tile chunks, with a crowd in it. Three uses:
 // - "pair": the same crowd split by entity (groups) and by area (cells), side by side.
-// - "query": click to place an entity, and see which cells its question reaches.
+// - "query": click to place an entity, and see which cells its spatial query reaches.
 // - "scaling": add and remove groups and cells, and see what moves.
 import { PX, SIZE, crowd, plan, renderLegend, renderMap } from './chunk-map';
 
@@ -44,7 +44,7 @@ const query = { x: 26, y: 34, r: 9 };
           class="wm-chunkmap"
           viewBox={`0 0 ${side} ${side}`}
           tabindex={mode === 'query' ? 0 : undefined}
-          aria-label={mode === 'query' ? 'Map: click or use the arrow keys to move the asking entity' : 'Map of entities and cells'}
+          aria-label={mode === 'query' ? 'Map: click or use the arrow keys to move the querying entity' : 'Map of entities and cells'}
           set:html={
             mode === 'query'
               ? renderMap(dots, { colorBy: 'cells', cells, query })
@@ -87,7 +87,7 @@ const query = { x: 26, y: 34, r: 9 };
       </div>
       <p class="wm-figure-readout" aria-live="polite" data-readout>
         {mode === 'query'
-          ? 'Click the map to move the asking entity.'
+          ? 'Click the map to move the querying entity.'
           : 'Add a group to see how many entities move.'}
       </p>
     </figure>
@@ -259,7 +259,7 @@ const query = { x: 26, y: 34, r: 9 };
         const owners = cellOwners(cells);
         const asked = [...new Set(chunksTouched(query.x, query.y, query.r).map((c) => owners[c]))].sort();
         const near = dots.filter((d) => Math.hypot(d.x - query.x, d.y - query.y) <= query.r).length;
-        readout.textContent = `The question goes to ${names(asked)}. ${near} entities are within ${query.r} tiles.`;
+        readout.textContent = `The query goes to ${names(asked)}. ${near} entities are within ${query.r} tiles.`;
       } else {
         svg.innerHTML = renderMap(dots, { colorBy, cells, groupOf, moved });
         fig.querySelector('[data-legend]')!.innerHTML = renderLegend(dots, { colorBy, cells, groupOf });

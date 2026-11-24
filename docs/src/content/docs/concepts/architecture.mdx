@@ -17,20 +17,21 @@ Every tick, a group:
 
 1. delivers the actions and commands that arrived since its last tick,
 2. runs your systems, stage by stage, for each of its entities, with its player's inputs due that tick,
-3. reports its entities to the cells whose areas they stand in: kind, visible components, and any "what's near me?" questions,
+3. reports its entities to the cells whose areas they stand in: kind, visible components, events, and any spatial queries,
 4. sends what its entities did: actions, events, spawns, and entities it was told to hand off.
 
 A group process runs as many groups as the orchestrator asks for.
 
 ## Spatial Layer Cells
 
-A cell owns an area: a set of chunks, each `chunk_size` tiles square. It simulates nothing. From the reports groups send every tick, it:
+Groups are split by entity count, so no group knows who is standing where across the world. Cells are the map that does. A cell owns an area (a set of chunks, each `chunk_size` tiles square) and, from the reports groups send every tick, keeps a copy of every entity in it, whichever group simulates it. It simulates nothing. Every tick, it:
 
-- answers "what's near me?" questions, back to the asking group before its next tick,
+- builds each player's view of its area, for that player's gateway,
+- puts the events that happened there in the views of the players who can see them,
 - passes actions aimed at an area to every group with an entity in range,
-- builds each player's view of its area, for that player's gateway.
+- answers spatial queries (which entities are within a radius), back to the querying group before its next tick.
 
-A cell rebuilds everything from the reports every tick. So moving an area to another cell hands nothing off: groups just send their next reports to the new owner.
+A cell rebuilds everything from the reports every tick. So moving an area to another cell hands nothing off: groups just send their next reports to the new owner. [The spatial layer](/Worldmesh/concepts/spatial-layer/) explains each job.
 
 ## The orchestrator
 
@@ -74,7 +75,7 @@ Each entity has its own subject, so nobody needs to know which group simulates i
 | `entity.<id>` | Anyone to the entity's group | Inputs, commands and actions for one entity |
 | `group.<id>.inbox` | Anyone to one group | Handoffs, forwards, area actions passed on by cells |
 | `group.all.inbox` | Groups to every group | Actions sent to everyone |
-| `group.<id>.senses` | Cells to one group | Answers to "what's near me?" |
+| `group.<id>.senses` | Cells to one group | Spatial query results |
 | `spatial.<id>.reports` | Groups to one cell | Each tick's report |
 | `spatial.<id>.inbox` | Groups to one cell | Actions aimed at an area |
 | `spatial.viewers` | Gateways to cells | Where each gateway's players are looking |

@@ -6,7 +6,7 @@
 // squares on the right. Exact, per envelope: handoffs, players' inputs and commands, actions,
 // area actions (group -> Spatial Layer Cell -> groups with someone in the circle), forwards.
 // Every-tick streams, with their real senders, receivers and sizes but sampled: groups' reports
-// to Spatial Layer Cells, answers to "what's near me?", players' views, and where players look.
+// to Spatial Layer Cells, spatial query results, players' views, and where players look.
 //
 // Under the legend, the last few actions are traced hop by hop (every envelope one action
 // leads to shares a trace id). The game says which of its events start and end a trace.
@@ -29,7 +29,7 @@ type Kind = 'handoff' | 'action' | 'senses' | 'forward' | 'player' | 'report' | 
 const KINDS: { kind: Kind; name: string; color: string }[] = [
   { kind: 'handoff', name: 'Handoff', color: '#3987e5' },
   { kind: 'action', name: 'Action (entity, area or everyone)', color: '#d95926' },
-  { kind: 'senses', name: 'Answer to "what\'s near me?"', color: '#199e70' },
+  { kind: 'senses', name: 'Spatial query results', color: '#199e70' },
   { kind: 'forward', name: 'Forwarded', color: '#c98500' },
   { kind: 'player', name: 'Player input or command', color: '#d55181' },
   { kind: 'report', name: 'Group report', color: '#898781' },

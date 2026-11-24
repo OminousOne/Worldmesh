@@ -2,7 +2,7 @@
 //!
 //! A [`TestWorld`] runs real Server Entity Groups and Spatial Layer Cells and passes their
 //! messages between them exactly as the bus would (actions to entities wherever they are,
-//! area actions through the cells, handoffs, "what's near me?" answers), but synchronously:
+//! area actions through the cells, handoffs, spatial query results), but synchronously:
 //! one [`TestWorld::step`] is one tick of the whole world.
 //!
 //! ```ignore

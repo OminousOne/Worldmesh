@@ -1,5 +1,5 @@
 // A small world for the docs' chunk map demos: how cells split the map, how the orchestrator
-// splits entities between groups, and which cells a "what's near me?" question reaches.
+// splits entities between groups, and which cells a spatial query reaches.
 // The splitting code is a port of worldmesh-core's `partition` and the orchestrator's `plan`.
 
 export const SIZE = 64; // tiles

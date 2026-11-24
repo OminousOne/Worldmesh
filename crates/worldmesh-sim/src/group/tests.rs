@@ -539,7 +539,7 @@ impl Component for Found {
     const NAME: &'static str = "found";
 }
 
-/// The test game plus a kind that asks what's near every tick and remembers what it found.
+/// The test game plus a kind that makes a spatial query every tick and remembers what it found.
 fn asking_world() -> GroupWorld {
     let mut world: World = crate::test_game::world();
     world

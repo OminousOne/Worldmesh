@@ -53,7 +53,7 @@ Never pass `--allow-debug` to a public gateway. It lets any connected player res
 
 ## What to watch
 
-Every process publishes its numbers once a second: CPU, memory, bus and WebSocket traffic, entities, tick time and load, actions, handoffs, questions and views. Gateways pass them on to players with the debug panel open, and its metrics view shows the last minute.
+Every process publishes its numbers once a second: CPU, memory, bus and WebSocket traffic, entities, tick time and load, actions, handoffs, spatial queries and views. Gateways pass them on to players with the debug panel open, and its metrics view shows the last minute.
 
 The number to watch is each group's and cell's **load**: the share of each tick it spends working. Past about 50%, add groups or cells.
 

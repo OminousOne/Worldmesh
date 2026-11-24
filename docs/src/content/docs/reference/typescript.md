@@ -26,7 +26,7 @@ new WorldmeshClient(
 | --- | --- | --- |
 | `url` | required | The gateway's WebSocket URL |
 | `compact` | `true` | Binary snapshots with only what changed |
-| `debug` | `false` | Include debug traffic (questions, bus messages) |
+| `debug` | `false` | Include debug traffic (spatial queries, bus messages) |
 | `stats` | `false` | Every process's numbers, once a second. The debug panel turns it on. |
 | `prediction` | none | Your movement rules (`PredictionRules`), to predict your own entity |
 | `shouldPredict(own)` | always | Whether to predict right now (say, not while dead) |

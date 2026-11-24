@@ -8,7 +8,7 @@ import { gatewayTotals } from './gateways.ts';
 /** Kinds of bus message in the "by kind" graph, in the order the server reports them. */
 const BUS_KINDS: { kind: string; name: string; color: string }[] = [
   { kind: 'reports', name: 'Reports (group → cell, every tick)', color: '#3987e5' },
-  { kind: 'senses', name: 'Answers to "what\'s near me?"', color: '#d95926' },
+  { kind: 'senses', name: 'Spatial query results', color: '#d95926' },
   { kind: 'views', name: 'Player views (cell → gateway)', color: '#199e70' },
   { kind: 'envelopes', name: 'Envelopes (inputs, actions, handoffs)', color: '#c98500' },
   { kind: 'debug', name: 'Debug (bus view data)', color: '#d55181' },

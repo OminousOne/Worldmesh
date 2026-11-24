@@ -7,7 +7,7 @@
 // This file is the game: Pixi drawing, combat effects, input, and the debug overlays.
 //
 // The world is simulated by Server Entity Groups (each owns some units, wherever they are)
-// and watched by Spatial Layer Cells (each owns an area and answers "what's near here?"). What
+// and watched by Spatial Layer Cells (each owns an area and builds players' views, routes area actions and answers spatial queries). What
 // you see is your view: whatever is on your screen, put together from every Spatial Layer Cell
 // your screen covers.
 
@@ -57,7 +57,7 @@ const TILE_COLORS: Record<number, [number, number]> = {
   [WATER]: [0x2d6aa3, 0x2a659c],
   [WALL]: [0x8a8070, 0x8a8070],
 };
-/** "What's near me?" questions: neutral, so they never look like a group's colour. */
+/** Spatial queries: neutral, so they never look like a group's colour. */
 const SENSE_COLOR = 0xc3c2b7;
 const MAX_HP = 100;
 /** Same numbers as the server's ability table (../server/src/combat.rs). The client only uses
@@ -252,7 +252,7 @@ async function main() {
   const world = new Container({ isRenderGroup: true });
   const groundLayer = new Container({ isRenderGroup: true });
   const spatialLayer = new Container(); // debug: Spatial Layer Cell areas
-  const senseLayer = new Graphics(); // debug: "what's near me?" circles, on the ground
+  const senseLayer = new Graphics(); // debug: spatial query circles, on the ground
   const viewLayer = new Graphics(); // debug: the outline of your view
   const markLayer = new Graphics(); // target ring and weapon range, on the ground
   const entityLayer = new Container({ isRenderGroup: true }); // walls + units + markers, depth sorted by x + y

@@ -46,7 +46,7 @@ pub enum Stage {
     First,
     /// Act: movement and most game rules.
     Update,
-    /// Tidy up: respawns, asking "what's near me?" from where the entity ended up.
+    /// Tidy up: respawns, spatial queries from where the entity ended up.
     Last,
 }
 
@@ -168,7 +168,7 @@ impl World {
     }
 
     /// A component that's also part of what others see: players who can see the entity, and
-    /// other entities asking "what's near me?".
+    /// other entities' spatial queries.
     pub fn visible<T: Component>(&mut self) -> &mut Self {
         self.register_component::<T>(true)
     }

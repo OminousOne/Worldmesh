@@ -37,7 +37,7 @@ The mistakes an agent is most likely to make, and what to do instead:
 4. **Actions land on the next tick, wherever the target is, and never twice.** Don't add your own retries, acks or delays.
 5. **Check actions on the receiving side with `Incoming::from` and `me.position_at(from.from.tick)`.** Never trust positions or ids a client put in a command or input.
 6. **Seed randomness from (entity id, tick).** An entity can move to another group at any tick and must decide the same thing there.
-7. **Make visible only what others need, and ask only for what you'll read** (`Query::with::<T>()`): views and answers dominate traffic in crowds.
+7. **Make visible only what others need, and ask only for what you'll read** (`Query::with::<T>()`): views and spatial query results dominate traffic in crowds.
 8. **Plugins meet through components.** To make two plugins work together, have one write a component the other reads (or register another handler for the same action), not call into each other's state.
 9. **Match the server's movement bit for bit in the client** (`Math.fround` wherever Rust does `f32` math) if you use prediction, and check it with vectors from the Rust side.
 10. **Test with `worldmesh::testing::TestWorld`**, with entities in different groups, before running servers.

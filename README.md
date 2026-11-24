@@ -13,7 +13,7 @@ Worldmesh is a networking library written in Rust, with a TypeScript client for 
 Worldmesh is the networking, and none of the game. Every entity gets an id, a position and a kind; everything else (health, movement, inventory, AI) is components and code your game adds as plugins. Worldmesh runs them across:
 
 - **Server Entity Groups**, which simulate entities wherever they stand (balanced by count, so a crowd spreads over as many groups as it takes), and hand them to each other live;
-- **Spatial Layer Cells**, which own areas of the map and answer "what's near me?", route actions aimed at an area, and build players' views;
+- **Spatial Layer Cells**, which own areas of the map and keep track of every entity in them: they build players' views, route actions aimed at an area, and answer spatial queries;
 - **an orchestrator**, which decides who owns what;
 - **gateways**, which hold players' WebSockets (as many as you need, down to one per player);
 

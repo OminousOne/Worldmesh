@@ -12,12 +12,13 @@
 //! - **kinds**: named bundles of components to spawn entities from.
 //!
 //! Game code always runs as one entity, through [`Me`]: it changes only that entity, and
-//! reaches others by sending actions and asking what's near. Worldmesh runs everything else:
+//! reaches others by sending actions and making spatial queries. Worldmesh runs everything else:
 //!
 //! - **Server Entity Groups** ([`group`]) simulate entities. Each entity lives in exactly one
 //!   group, and groups hand entities to each other live. This is the only place game code runs.
-//! - **Spatial Layer Cells** ([`spatial`]) each own an area of the map. They answer "what's
-//!   near me?", route actions aimed at an area, and build what each player can see.
+//! - **Spatial Layer Cells** ([`spatial`]) each own an area of the map and keep track of every
+//!   entity in it. They build what each player can see, route actions aimed at an area, and
+//!   answer spatial queries (which entities are within a radius, in any group).
 //! - **The orchestrator** ([`orchestrator`]) decides which groups and cells are in use, who
 //!   owns which area, and which group each new entity goes to.
 //! - **Gateways** ([`gateway`]) hold players' WebSockets and merge their views.

@@ -8,7 +8,7 @@ import ChunkMap from '../../../components/diagrams/ChunkMap.astro';
 Two numbers set a world's capacity, and both can change while it runs:
 
 - **Groups in use**: how many Server Entity Groups share the entities. This is the capacity for simulation. Group processes start as many groups as they're asked for, up to 1,000 in use.
-- **Cells in use**: how many Spatial Layer Cells share the map. This is the capacity for questions, area actions and views, up to the number of cell processes running.
+- **Cells in use**: how many Spatial Layer Cells share the map. This is the capacity for views, events, area actions and spatial queries, up to the number of cell processes running.
 
 You set both by hand for now: `--groups` and `--spatial` on the orchestrator at start, then live from the [debug panel](/Worldmesh/guides/debug-panel/). Automatic scaling, from the load every process already reports, is on the roadmap.
 

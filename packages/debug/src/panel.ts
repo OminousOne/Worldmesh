@@ -270,7 +270,7 @@ export class DebugPanel {
     );
     this.els.spatialRunning = make('span', cellsRow, 'muted');
     this.els.spatialLegend = make('div', r, 'legend wm-spatial-legend');
-    checkbox('senses', 'Show "what\'s near me?" questions', 'N', false);
+    checkbox('senses', 'Show spatial queries', 'N', false);
     checkbox('view', 'Show my view on a map', 'V', false);
     const minimap = make('canvas', r, 'wm-minimap');
     minimap.title = "The whole world: Spatial Layer Cell areas, your view and what's in it, by group";

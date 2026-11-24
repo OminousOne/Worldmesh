@@ -57,7 +57,7 @@ export type ClientOptions<S, I, V> = {
   url: string;
   /** Optimized (binary, only what changed) snapshots. Default true. */
   compact?: boolean;
-  /** Include debug traffic (bus view, "what's near me?" questions). Default false. */
+  /** Include debug traffic (bus view, spatial queries). Default false. */
   debug?: boolean;
   /** Get every process's numbers once a second (the `stats` handler). Default false; the
    * debug panel turns it on. */

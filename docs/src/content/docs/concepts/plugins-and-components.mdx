@@ -15,7 +15,7 @@ Worldmesh ships no game rules: no health, no movement speed, no inventory, no AI
 | Which server simulates each entity, and moving it between servers as it moves | What happens on a tick: your systems |
 | Getting a player's inputs and commands to their entity, wherever it is | What an input or command does: your handlers |
 | Delivering actions between entities on the next tick, never twice | What an action does to its target: your handlers |
-| "What's near me?" across servers | What an entity does with the answer |
+| Spatial queries across servers | What an entity does with the results |
 | Building each player's view and sending only what changed | Which components players can see |
 | Showing events to the right players | What your events look like on screen |
 
@@ -87,7 +87,7 @@ A component's name defaults to its type's name in snake case. Clients see compon
 
 An entity's components move with it whenever it moves to another server, so keep everything an entity needs in them.
 
-**Visible or hidden.** A visible component is part of what others see of the entity: the players whose screen it's on, and other entities asking "what's near me?". Keep everything else hidden: it never leaves the entity's group, except to move with it in a handoff. Switch these around and watch what a player receives:
+**Visible or hidden.** A visible component is part of what others see of the entity: the players whose screen it's on, and other entities' spatial queries. Keep everything else hidden: it never leaves the entity's group, except to move with it in a handoff. Switch these around and watch what a player receives:
 
 <VisibilityDemo />
 
@@ -138,7 +138,7 @@ A system runs once per tick for every entity, or with `system_for::<T>`, for eve
 | --- | --- |
 | `First` | Deciding: AI, reacting to what arrived |
 | `Update` | Doing: movement, most rules |
-| `Last` | Cleaning up: respawning, asking "what's near me?" for the next tick |
+| `Last` | Cleaning up: respawning, spatial queries for the next tick |
 
 Commands and actions are handled before the systems run, so a hit that landed this tick is already applied when your systems see the entity.
 

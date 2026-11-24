@@ -3,7 +3,7 @@ title: Testing game rules
 description: Run a whole world in one process with TestWorld, tick by tick, and assert on what happened.
 ---
 
-`worldmesh::testing::TestWorld` runs real Server Entity Groups and Spatial Layer Cells in one process, without NATS. It passes their messages exactly as the bus would: actions to entities in any group, area actions through the cells, handoffs, spawns, "what's near me?" answers and players' views. One `step()` is one tick of the whole world.
+`worldmesh::testing::TestWorld` runs real Server Entity Groups and Spatial Layer Cells in one process, without NATS. It passes their messages exactly as the bus would: actions to entities in any group, area actions through the cells, handoffs, spawns, spatial query results and players' views. One `step()` is one tick of the whole world.
 
 ## A first test
 

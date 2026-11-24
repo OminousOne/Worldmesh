@@ -57,7 +57,8 @@ pub enum Role {
         #[arg(long, env = "GROUP_ID")]
         group_id: Option<GroupId>,
     },
-    /// Run a Spatial Layer Cell: answers "what's near here?" for the chunks it's given.
+    /// Run a Spatial Layer Cell: tracks every entity in the chunks it's given, builds players'
+    /// views of them, routes area actions and answers spatial queries.
     Spatial {
         /// Fixed id; by default each process picks a random one.
         #[arg(long, env = "SPATIAL_ID")]

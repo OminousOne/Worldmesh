@@ -123,8 +123,8 @@ Within a stage, systems run in the order they were registered. Commands and acti
 | Method | Returns |
 | --- | --- |
 | `local()` | The other entities in this group: exact and current |
-| `query(q)` | Asks who's near, in any group, answered by the next tick. `q` is a radius or a `Query`. |
-| `sensed()` | Other groups' entities from the latest answer. Dropped after a second. |
+| `query(q)` | A spatial query: which entities are within a radius, in any group. Results by the next tick. `q` is a radius or a `Query`. |
+| `sensed()` | Other groups' entities from the latest query results. Dropped after a second. |
 | `nearby(r)` | Everything this entity knows of within `r` tiles, from both |
 | `find(id)` | What this entity knows of one entity, if anything |
 
@@ -137,7 +137,7 @@ pub struct Nearby<'a> {
     pub y: f32,
     pub group: GroupId,
     pub player: bool,
-    /// Exact and current (this group), or from an answer.
+    /// Exact and current (this group), or from query results.
     pub local: bool,
     // ...
 }
@@ -160,7 +160,7 @@ me.query(6.0);
 me.query(Query::within(12.0).nearest(5).target(foe).with::<Dead>());
 ```
 
-| Method | Narrows the answer to |
+| Method | Narrows the results to |
 | --- | --- |
 | `Query::within(r)` | Entities within `r` tiles |
 | `.nearest(n)` | The `n` closest. 0 means all. |
@@ -236,4 +236,4 @@ pub struct Facts {
 - **Never assume where another entity is simulated.** It might be in this group now and another one next tick. Use actions for anything that changes another entity.
 - **Judge actions by `from` and `position_at(from.from.tick)`**, never by what the sender claims in the action.
 - **Seed randomness from the entity and the tick**, so an entity decides the same thing whichever group simulates it.
-- **Ask only for what you'll read.** `Query::with` keeps answers small, and answers are the biggest thing on the bus in a crowd.
+- **Ask only for what you'll read.** `Query::with` keeps spatial query results small, and they're the biggest thing on the bus in a crowd.

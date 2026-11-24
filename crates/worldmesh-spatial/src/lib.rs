@@ -1,10 +1,11 @@
-//! Spatial Layer Cells: each owns an area (a set of chunks) and answers "what's near here?".
+//! Spatial Layer Cells: each owns an area (a set of chunks) and keeps track of every entity in it,
+//! whichever group simulates it.
 //!
 //! A cell simulates nothing and decides nothing about entities. Every tick each Server Entity
 //! Group sends it a report: that group's entities standing in this cell's area (with the
 //! game's view of each, as opaque bytes). From those copies it
 //!
-//! - answers "what's near me?" (back to the asking group, before its next tick),
+//! - answers spatial queries (back to the querying group, before its next tick),
 //! - passes area actions on to every group with an entity in the circle,
 //! - builds each player's view of its area for the gateway.
 //!

@@ -6,7 +6,7 @@
 //!   its own player.
 //! - [`combat::Combat`]: health, abilities, death and respawning.
 //! - [`bots::Bots`]: bot AI. It sees the world only through what Worldmesh gives it (its own
-//!   group's entities exactly, everyone else from "what's near me?" answers).
+//!   group's entities exactly, everyone else from spatial query results).
 //!
 //! [`world`] puts them together with the map and two kinds of unit, "hero" (players) and
 //! "bot".

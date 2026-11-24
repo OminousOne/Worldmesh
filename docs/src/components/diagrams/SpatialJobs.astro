@@ -1,0 +1,130 @@
+---
+// What goes into a Spatial Layer Cell every tick, and the four things it sends out.
+type Box = { x: number; y: number; w: number; h: number; role: string; title: string; sub: string };
+const groups: Box = { x: 10, y: 52, w: 170, h: 62, role: 'group', title: 'Groups', sub: 'their entities in the area' };
+const gateways: Box = { x: 10, y: 186, w: 170, h: 62, role: 'gateway', title: 'Gateways', sub: 'where players are looking' };
+const cell: Box = { x: 275, y: 82, w: 190, h: 136, role: 'cell', title: 'Spatial Layer Cell', sub: '' };
+const outs: Box[] = [
+  { x: 560, y: 14, w: 190, h: 56, role: 'gateway', title: "Players' views", sub: "to each player's gateway" },
+  { x: 560, y: 84, w: 190, h: 56, role: 'player', title: 'Events', sub: 'to players who can see them' },
+  { x: 560, y: 154, w: 190, h: 56, role: 'action', title: 'Area actions', sub: 'to groups with entities in range' },
+  { x: 560, y: 224, w: 190, h: 56, role: 'group', title: 'Spatial query results', sub: 'to the groups that asked' },
+];
+const mid = (b: Box) => b.y + b.h / 2;
+const link = (x1: number, y1: number, x2: number, y2: number) => {
+  const mx = (x1 + x2) / 2;
+  return `M${x1} ${y1}C${mx} ${y1} ${mx} ${y2} ${x2 - 2} ${y2}`;
+};
+---
+
+<figure class="wm-figure not-content wm-spatialjobs">
+  <svg viewBox="0 0 760 294" role="img" aria-label="Groups and gateways send a Spatial Layer Cell what's in its area and where players look. The cell sends out players' views, events, area actions and spatial query results.">
+    <defs>
+      {
+        ['group', 'gateway', 'player', 'action'].map((r) => (
+          <marker id={`wm-jobs-${r}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 10 5 0 10z" class={`fill-${r}`} />
+          </marker>
+        ))
+      }
+    </defs>
+    <path class="line role-group" d={link(groups.x + groups.w, mid(groups), cell.x, cell.y + 45)} marker-end="url(#wm-jobs-group)" />
+    <path class="line role-gateway dashed" d={link(gateways.x + gateways.w, mid(gateways), cell.x, cell.y + cell.h - 45)} marker-end="url(#wm-jobs-gateway)" />
+    {
+      outs.map((o, i) => (
+        <path
+          class:list={['line', `role-${o.role}`]}
+          d={link(cell.x + cell.w, cell.y + 30 + i * 25, o.x, mid(o))}
+          marker-end={`url(#wm-jobs-${o.role})`}
+        />
+      ))
+    }
+    {
+      [groups, gateways, ...outs].map((b) => (
+        <g class:list={['box', `role-${b.role}`]} transform={`translate(${b.x} ${b.y})`}>
+          <rect width={b.w} height={b.h} rx="11" />
+          <rect class="band" x="10" y="10" width="5" height={b.h - 20} rx="2.5" />
+          <text class="title" x="26" y={b.h / 2 - 3}>{b.title}</text>
+          <text class="sub" x="26" y={b.h / 2 + 14}>{b.sub}</text>
+        </g>
+      ))
+    }
+    <g class="box role-cell main" transform={`translate(${cell.x} ${cell.y})`}>
+      <rect width={cell.w} height={cell.h} rx="14" />
+      <text class="title" x={cell.w / 2} y="40" text-anchor="middle">Spatial Layer Cell</text>
+      <text class="sub" x={cell.w / 2} y="66" text-anchor="middle">a copy of everyone</text>
+      <text class="sub" x={cell.w / 2} y="83" text-anchor="middle">in its area, rebuilt</text>
+      <text class="sub" x={cell.w / 2} y="100" text-anchor="middle">every tick</text>
+    </g>
+  </svg>
+  <figcaption>
+    Every tick: groups report the entities standing in the cell's area, and gateways say where their players are
+    looking. The cell sends out four things. It runs no game code and simulates nothing.
+  </figcaption>
+</figure>
+
+<style>
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .role-group {
+    --role: var(--wm-role-group);
+  }
+  .role-gateway {
+    --role: var(--wm-role-gateway);
+  }
+  .role-player {
+    --role: var(--wm-role-player);
+  }
+  .role-action {
+    --role: var(--wm-role-action);
+  }
+  .role-cell {
+    --role: var(--wm-role-cell);
+  }
+  .fill-group {
+    fill: var(--wm-role-group);
+  }
+  .fill-gateway {
+    fill: var(--wm-role-gateway);
+  }
+  .fill-player {
+    fill: var(--wm-role-player);
+  }
+  .fill-action {
+    fill: var(--wm-role-action);
+  }
+  .box rect:first-child {
+    fill: var(--wm-fig-node);
+    stroke: var(--role);
+    stroke-width: 2;
+  }
+  .box.main rect:first-child {
+    fill: color-mix(in oklab, var(--role) 16%, var(--wm-fig-node));
+    stroke-width: 3;
+  }
+  .band {
+    fill: var(--role);
+  }
+  .title {
+    font: 700 14px var(--__sl-font);
+    fill: var(--wm-fig-text);
+  }
+  .main .title {
+    font-size: 16px;
+  }
+  .sub {
+    font: 500 11.5px var(--__sl-font);
+    fill: var(--wm-fig-muted);
+  }
+  .line {
+    fill: none;
+    stroke: var(--role);
+    stroke-width: 2.5;
+  }
+  .line.dashed {
+    stroke-dasharray: 5 5;
+  }
+</style>

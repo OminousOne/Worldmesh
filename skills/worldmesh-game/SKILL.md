@@ -7,7 +7,7 @@ description: Build or change a multiplayer game on the Worldmesh Rust library. U
 
 Worldmesh splits a multiplayer world across many servers. It does the networking and **none of the game**: every entity gets an id, a position, a "controlled by a player" flag and a kind from Worldmesh, and nothing else. Health, movement, inventory, AI: all of it is your code, added as plugins. Don't look for game features in the library.
 
-A game is a `World` built from plugins. Worldmesh runs it in Server Entity Groups (each simulates some entities, wherever they stand), with Spatial Layer Cells answering "what's near me?", an orchestrator placing entities, and gateways holding players' WebSockets, all over NATS.
+A game is a `World` built from plugins. Worldmesh runs it in Server Entity Groups (each simulates some entities, wherever they stand), with Spatial Layer Cells tracking who is where (they build players' views, route area actions and answer spatial queries), an orchestrator placing entities, and gateways holding players' WebSockets, all over NATS.
 
 Full docs: https://ominousone.github.io/Worldmesh/ (everything in one file: `/llms-full.txt`). Working examples: `examples/hello` (tag, one plugin) and `examples/medieval/server` (Movement, Combat and Bots plugins).
 
@@ -70,7 +70,7 @@ Components and messages derive `Component` / `Message` plus `Serialize, Deserial
 
 - `kind(name, bundle)` again with an existing name **adds** components to that kind, so each plugin contributes its own components to shared kinds ("hero", "bot").
 - A message is exactly one of command, action or event. Commands and actions can have **any number of handlers**, across plugins, run in registration order (stopping if one despawns the entity).
-- Systems run in stages: `Stage::First` (decide, AI), `Stage::Update` (do, movement), `Stage::Last` (clean up, respawn, ask what's near). Each stage runs across all entities before the next. Commands and actions are handled before `First`.
+- Systems run in stages: `Stage::First` (decide, AI), `Stage::Update` (do, movement), `Stage::Last` (clean up, respawn, spatial queries). Each stage runs across all entities before the next. Commands and actions are handled before `First`.
 
 ## Me: what entity code can do
 
