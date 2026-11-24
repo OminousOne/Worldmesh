@@ -1,0 +1,20 @@
+{
+  "name": "@worldmesh/debug",
+  "version": "0.1.0",
+  "description": "Debug panel for Worldmesh worlds: groups, cells, scaling, fake lag, bus traffic and metrics.",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/OminousOne/Worldmesh.git", "directory": "packages/debug" },
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@worldmesh/client": "^0.1.0"
+  },
+  "devDependencies": {
+    "@worldmesh/client": "^0.1.0",
+    "typescript": "^7.0.2"
+  }
+}
