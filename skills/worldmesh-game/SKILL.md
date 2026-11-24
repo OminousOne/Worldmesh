@@ -87,7 +87,7 @@ Components and messages derive `Component` / `Message` plus `Serialize, Deserial
 1. Worldmesh is only the networking. Every game feature (even walking) is a component plus a system or handler in your plugin.
 2. Game code runs only in systems and command/action handlers, through `me`, and **changes only the entity it runs for**. Plugins are shared and read-only: put every per-entity value in a component.
 3. Change another entity only by `me.send` an action. Never store state about other entities outside your own components; they may be on another machine.
-4. Actions land on the next tick, exactly once, wherever the target is, even mid-handoff. Don't add retries, acks or delays.
+4. Actions land on the next tick, wherever the target is, even mid-handoff, and are never applied twice. Don't add retries, acks or delays.
 5. Split abilities in two: the user's side (command handler or system: alive, cooldown, a point in reach) sends; the target's side (action handler) checks and applies.
 6. On the target's side, judge with `from.from` (sender id, group, x, y, tick: stamped by the sender's group, never by a client) and `me.position_at(from.from.tick)`. Never trust positions or ids a client put in a command.
 7. Plugins meet through components: one writes a component the other reads (medieval: Combat inserts `Immobile` on death, Movement skips immobile units; Combat writes `LastHit`, Bots reads it), or registers another handler for the same action. Expose a `pub fn` (like medieval's `combat::use_ability`) when another plugin should act exactly as a player would.

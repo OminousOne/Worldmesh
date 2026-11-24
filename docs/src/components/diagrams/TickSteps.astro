@@ -1,0 +1,313 @@
+---
+// One tick of a running world, step by step: groups simulate, report to cells, cells answer
+// and build views, the gateway sends snapshots, and everything sent waits for the next tick.
+
+type Node = { id: string; label: string; sub: string; x: number; y: number; role: string };
+const W = 150;
+const H = 58;
+const nodes: Node[] = [
+  { id: 'g1', label: 'Group 1', sub: 'simulates its entities', x: 20, y: 40, role: 'group' },
+  { id: 'g2', label: 'Group 2', sub: 'simulates its entities', x: 20, y: 200, role: 'group' },
+  { id: 'ca', label: 'Cell A', sub: 'owns half the map', x: 285, y: 40, role: 'cell' },
+  { id: 'cb', label: 'Cell B', sub: 'owns the other half', x: 285, y: 200, role: 'cell' },
+  { id: 'gw', label: 'Gateway', sub: 'merges views', x: 550, y: 40, role: 'gateway' },
+  { id: 'pl', label: 'Players', sub: 'browsers', x: 550, y: 200, role: 'player' },
+];
+const at = (id: string) => nodes.find((n) => n.id === id)!;
+const right = (n: Node) => [n.x + W, n.y + H / 2] as const;
+const left = (n: Node) => [n.x, n.y + H / 2] as const;
+
+// Each edge: a path, and the steps it's busy in.
+// `lane` shifts both ends up or down, so traffic each way gets its own line.
+const curve = (a: readonly [number, number], b: readonly [number, number], lane = 0) => {
+  const mx = (a[0] + b[0]) / 2;
+  return `M${a[0]} ${a[1] + lane}C${mx} ${a[1] + lane} ${mx} ${b[1] + lane} ${b[0]} ${b[1] + lane}`;
+};
+const edges = [
+  { id: 'g1-ca', role: 'group', d: curve(right(at('g1')), left(at('ca')), -8), steps: [1] },
+  { id: 'g1-cb', role: 'group', d: curve(right(at('g1')), left(at('cb')), -8), steps: [1] },
+  { id: 'g2-ca', role: 'group', d: curve(right(at('g2')), left(at('ca')), -8), steps: [1] },
+  { id: 'g2-cb', role: 'group', d: curve(right(at('g2')), left(at('cb')), -8), steps: [1] },
+  { id: 'ca-g1', role: 'cell', d: curve(left(at('ca')), right(at('g1')), 9), steps: [2], back: true },
+  { id: 'cb-g2', role: 'cell', d: curve(left(at('cb')), right(at('g2')), 9), steps: [2], back: true },
+  { id: 'ca-gw', role: 'cell', d: curve(right(at('ca')), left(at('gw'))), steps: [2] },
+  { id: 'cb-gw', role: 'cell', d: curve(right(at('cb')), left(at('gw'))), steps: [2] },
+  {
+    id: 'gw-pl',
+    d: `M${at('gw').x + W / 2} ${at('gw').y + H}L${at('pl').x + W / 2} ${at('pl').y}`,
+    steps: [3],
+  },
+];
+const nodeSteps: Record<string, number[]> = {
+  g1: [0, 4],
+  g2: [0, 4],
+  ca: [2],
+  cb: [2],
+  gw: [3],
+  pl: [3],
+};
+
+const steps = [
+  {
+    role: 'group',
+    title: 'The tick starts',
+    when: '0 ms',
+    body: 'Every group starts tick n at the same moment: they share a clock. Each hands its entities the actions and commands that arrived since the last tick, then runs your systems, stage by stage.',
+  },
+  {
+    role: 'group',
+    title: 'Groups report to cells',
+    when: 'a few ms in',
+    body: "Each group sends every cell a report of its entities in that cell's area: positions, kinds, visible components, and any \"what's near me?\" questions. Actions aimed at an area go to that area's cell.",
+  },
+  {
+    role: 'cell',
+    title: 'Cells answer and build views',
+    when: 'once every report is in',
+    body: "With every group's report in (or after 40 ms), a cell answers the questions, passes area actions on to the groups with entities in range, and builds each player's view of its area.",
+  },
+  {
+    role: 'gateway',
+    title: 'The gateway sends snapshots',
+    when: 'once every view is in',
+    body: "With every cell's views in (or after 60 ms), the gateway merges each player's parts and sends them one snapshot with only what changed.",
+  },
+  {
+    role: 'group',
+    title: 'Ready for the next tick',
+    when: '100 ms',
+    body: 'Actions sent this tick, and the answers to its questions, are waiting in the groups. Tick n + 1 delivers them, wherever their targets are.',
+  },
+];
+---
+
+<figure class="wm-figure not-content wm-ticksteps" data-step="0">
+  <svg viewBox="0 0 720 280" role="img" aria-label="Groups, cells, the gateway and players, with the messages of one tick">
+    <defs>
+      <marker id="wm-tick-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 10 5 0 10z" />
+      </marker>
+    </defs>
+    {
+      edges.map((e) => (
+        <path
+          id={`wm-tick-${e.id}`}
+          class:list={['edge', `role-${e.role}`, { back: e.back }]}
+          data-role={e.role}
+          d={e.d}
+          data-steps={e.steps.join(',')}
+          marker-end="url(#wm-tick-arrow)"
+        />
+      ))
+    }
+    {
+      nodes.map((n) => (
+        <g class:list={['node', `role-${n.role}`]} data-steps={nodeSteps[n.id].join(',')} transform={`translate(${n.x} ${n.y})`}>
+          <rect width={W} height={H} rx="12" />
+          <rect class="band" width="6" height={H - 20} x="10" y="10" rx="3" />
+          <text class="label" x={W / 2} y="25">{n.label}</text>
+          <text class="sub" x={W / 2} y="44">{n.sub}</text>
+        </g>
+      ))
+    }
+    <g class="inbox" data-steps="4">
+      <circle cx={20 + W} cy="40" r="9" />
+      <circle cx={20 + W} cy="200" r="9" />
+    </g>
+  </svg>
+  <ol class="wm-steps">
+    {
+      steps.map((s, i) => (
+        <li data-index={i} class={`role-${s.role}`}>
+          <span class="chip" aria-hidden="true" />
+          <strong>{s.title}</strong> <span class="when">{s.when}</span>
+          <p>{s.body}</p>
+        </li>
+      ))
+    }
+  </ol>
+  <div class="wm-figure-controls" hidden data-controls>
+    <button class="wm-btn" type="button" data-go="-1">Back</button>
+    <button class="wm-btn primary" type="button" data-go="1">Next step</button>
+    <span class="wm-step-count" aria-live="polite">Step 1 of {steps.length}</span>
+  </div>
+</figure>
+
+<style>
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .role-group {
+    --role: var(--wm-role-group);
+  }
+  .role-cell {
+    --role: var(--wm-role-cell);
+  }
+  .role-gateway {
+    --role: var(--wm-role-gateway);
+  }
+  .role-player {
+    --role: var(--wm-role-player);
+  }
+  .node rect {
+    fill: var(--wm-fig-node);
+    stroke: color-mix(in oklab, var(--role) 45%, var(--wm-fig-line));
+    stroke-width: 1.5;
+    transition: stroke 0.2s, fill 0.2s;
+  }
+  .node .band {
+    fill: var(--role);
+    stroke: none;
+  }
+  .node .label {
+    font: 700 15px var(--__sl-font);
+    fill: var(--wm-fig-text);
+    text-anchor: middle;
+  }
+  .node .sub {
+    font: 500 11.5px var(--__sl-font);
+    fill: var(--wm-fig-muted);
+    text-anchor: middle;
+  }
+  .node.on rect:not(.band) {
+    stroke: var(--role);
+    stroke-width: 3;
+    fill: color-mix(in oklab, var(--role) 26%, var(--wm-fig-node));
+  }
+  .edge {
+    fill: none;
+    stroke: var(--wm-fig-line);
+    stroke-width: 1.5;
+    opacity: 0.55;
+    transition: opacity 0.2s, stroke 0.2s;
+  }
+  .edge.back {
+    stroke-dasharray: 5 5;
+  }
+  .edge.on {
+    stroke: var(--role);
+    stroke-width: 2.5;
+    opacity: 1;
+  }
+  marker path {
+    fill: var(--wm-fig-muted);
+  }
+  .inbox {
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .inbox.on {
+    opacity: 1;
+  }
+  .inbox circle {
+    fill: var(--wm-role-action);
+    stroke: var(--wm-fig-node);
+    stroke-width: 3;
+  }
+  :global(.wm-ticksteps .packet) {
+    fill: var(--role);
+    stroke: var(--wm-fig-node);
+    stroke-width: 2;
+  }
+  :global(.wm-ticksteps .packet.role-group) {
+    --role: var(--wm-role-group);
+  }
+  :global(.wm-ticksteps .packet.role-cell) {
+    --role: var(--wm-role-cell);
+  }
+  :global(.wm-ticksteps .packet.role-gateway) {
+    --role: var(--wm-role-gateway);
+  }
+  .chip {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin-inline-end: 0.45rem;
+    border-radius: 50%;
+    background: var(--role);
+  }
+  .wm-steps {
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .wm-steps li + li {
+    margin-top: 0.9rem;
+  }
+  .wm-steps strong {
+    color: var(--wm-fig-text);
+  }
+  .wm-steps .when {
+    margin-inline-start: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-3);
+  }
+  .wm-steps p {
+    margin: 0.3rem 0 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+  .wm-ticksteps.js .wm-steps li:not(.current) {
+    display: none;
+  }
+  .wm-ticksteps.js .wm-steps {
+    min-height: 7.5rem;
+  }
+  .wm-step-count {
+    color: var(--sl-color-gray-3);
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+
+<script>
+  const SVG = 'http://www.w3.org/2000/svg';
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+
+  for (const fig of document.querySelectorAll<HTMLElement>('.wm-ticksteps')) {
+    const items = [...fig.querySelectorAll<HTMLElement>('.wm-steps li')];
+    const parts = [...fig.querySelectorAll<SVGElement>('[data-steps]')];
+    const svg = fig.querySelector('svg')!;
+    const count = fig.querySelector<HTMLElement>('.wm-step-count')!;
+    const [back, next] = fig.querySelectorAll<HTMLButtonElement>('[data-go]');
+    let step = 0;
+    fig.classList.add('js');
+    fig.querySelector<HTMLElement>('[data-controls]')!.hidden = false;
+
+    function show(i: number) {
+      step = (i + items.length) % items.length;
+      items.forEach((li, k) => li.classList.toggle('current', k === step));
+      for (const p of parts) {
+        const on = p.dataset.steps!.split(',').map(Number).includes(step);
+        p.classList.toggle('on', on);
+      }
+      svg.querySelectorAll('.packet').forEach((p) => p.remove());
+      if (!still.matches) {
+        for (const edge of parts) {
+          if (!(edge instanceof SVGPathElement) || !edge.classList.contains('on')) continue;
+          const dot = document.createElementNS(SVG, 'circle');
+          dot.setAttribute('r', '5');
+          dot.setAttribute('class', `packet role-${edge.dataset.role}`);
+          const move = document.createElementNS(SVG, 'animateMotion');
+          move.setAttribute('dur', '1.3s');
+          move.setAttribute('repeatCount', 'indefinite');
+          const mpath = document.createElementNS(SVG, 'mpath');
+          mpath.setAttribute('href', `#${edge.id}`);
+          move.append(mpath);
+          dot.append(move);
+          svg.append(dot);
+        }
+      }
+      count.textContent = `Step ${step + 1} of ${items.length}`;
+      back.disabled = step === 0;
+      next.textContent = step === items.length - 1 ? 'Start over' : 'Next step';
+    }
+
+    back.addEventListener('click', () => show(step - 1));
+    next.addEventListener('click', () => show(step + 1));
+    show(0);
+  }
+</script>

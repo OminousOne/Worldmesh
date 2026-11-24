@@ -26,7 +26,10 @@ export default defineConfig({
         '@fontsource-variable/spline-sans-mono',
         './src/styles/theme.css',
       ],
-      components: { Hero: './src/components/Hero.astro' },
+      components: {
+        Hero: './src/components/Hero.astro',
+        PageTitle: './src/components/PageTitle.astro',
+      },
       expressiveCode: {
         styleOverrides: {
           borderRadius: '10px',

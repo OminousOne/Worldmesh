@@ -1,0 +1,341 @@
+---
+// A 64 x 64 tile world in 8-tile chunks, with a crowd in it. Three uses:
+// - "pair": the same crowd split by entity (groups) and by area (cells), side by side.
+// - "query": click to place an entity, and see which cells its question reaches.
+// - "scaling": add and remove groups and cells, and see what moves.
+import { PX, SIZE, crowd, plan, renderLegend, renderMap } from './chunk-map';
+
+interface Props {
+  mode: 'pair' | 'query' | 'scaling';
+  groups?: number;
+  cells?: number;
+}
+const { mode, groups = 3, cells = 3 } = Astro.props;
+const dots = crowd();
+const groupOf = plan(dots, groups, new Map());
+const side = SIZE * PX;
+const query = { x: 26, y: 34, r: 9 };
+---
+
+{
+  mode === 'pair' ? (
+    <figure class="wm-figure not-content">
+      <div class="wm-pair">
+        <div>
+          <svg class="wm-chunkmap" viewBox={`0 0 ${side} ${side}`} role="img" aria-label={`The crowd colored by the ${groups} groups simulating it`} set:html={renderMap(dots, { colorBy: 'groups', cells, groupOf })} />
+          <p class="wm-pair-label">By entity: each color is a Server Entity Group</p>
+          <ul class="wm-legend" set:html={renderLegend(dots, { colorBy: 'groups', cells, groupOf })} />
+        </div>
+        <div>
+          <svg class="wm-chunkmap" viewBox={`0 0 ${side} ${side}`} role="img" aria-label={`The map colored by the ${cells} cells that own its areas`} set:html={renderMap(dots, { colorBy: 'cells', cells })} />
+          <p class="wm-pair-label">By area: each color is a Spatial Layer Cell</p>
+          <ul class="wm-legend" set:html={renderLegend(dots, { colorBy: 'cells', cells })} />
+        </div>
+      </div>
+      <figcaption>
+        The same 130 entities, split both ways. Groups are balanced by count, so the crowded town is
+        shared between several of them. Cells own runs of 8-tile chunks.
+      </figcaption>
+    </figure>
+  ) : (
+    <figure class="wm-figure not-content wm-chunkmap-live" data-mode={mode} data-groups={groups} data-cells={cells} data-query={JSON.stringify(query)}>
+      <div class="wm-figure-stage">
+        <svg
+          class="wm-chunkmap"
+          viewBox={`0 0 ${side} ${side}`}
+          tabindex={mode === 'query' ? 0 : undefined}
+          aria-label={mode === 'query' ? 'Map: click or use the arrow keys to move the asking entity' : 'Map of entities and cells'}
+          set:html={
+            mode === 'query'
+              ? renderMap(dots, { colorBy: 'cells', cells, query })
+              : renderMap(dots, { colorBy: 'groups', cells, groupOf })
+          }
+        />
+        {mode === 'scaling' && <ul class="wm-legend" data-legend set:html={renderLegend(dots, { colorBy: 'groups', cells, groupOf })} />}
+      </div>
+      <div class="wm-figure-controls">
+        {mode === 'scaling' && (
+          <div class="wm-segmented" role="group" aria-label="Color by">
+            <button class="wm-btn" type="button" data-color="groups" aria-pressed="true">Groups</button>
+            <button class="wm-btn" type="button" data-color="cells" aria-pressed="false">Cells</button>
+          </div>
+        )}
+        {mode === 'scaling' && (
+          <div class="wm-stepper">
+            <span>Groups</span>
+            <button class="wm-btn" type="button" data-step="groups:-1" aria-label="Remove a group">−</button>
+            <output data-out="groups">{groups}</output>
+            <button class="wm-btn" type="button" data-step="groups:1" aria-label="Add a group">+</button>
+          </div>
+        )}
+        <div class="wm-stepper">
+          <span>Cells</span>
+          <button class="wm-btn" type="button" data-step="cells:-1" aria-label="Remove a cell">−</button>
+          <output data-out="cells">{cells}</output>
+          <button class="wm-btn" type="button" data-step="cells:1" aria-label="Add a cell">+</button>
+        </div>
+        {mode === 'query' && (
+          <label class="wm-slider">
+            <span>Radius</span>
+            <input type="range" min="2" max="20" step="1" value={query.r} data-radius />
+            <output data-out="radius">{query.r} tiles</output>
+          </label>
+        )}
+      </div>
+      <p class="wm-figure-readout" aria-live="polite" data-readout>
+        {mode === 'query'
+          ? 'Click the map to move the asking entity.'
+          : 'Add a group to see how many entities move.'}
+      </p>
+    </figure>
+  )
+}
+
+<style is:global>
+  .wm-chunkmap {
+    display: block;
+    width: 100%;
+    max-width: 30rem;
+    margin-inline: auto;
+    height: auto;
+    border-radius: 10px;
+    background: var(--wm-fig-node);
+  }
+  .wm-chunkmap .area.plain {
+    fill: var(--wm-fig-node);
+    stroke: var(--wm-fig-grid);
+    stroke-width: 1;
+  }
+  .wm-chunkmap .area[class*='cat-'] {
+    fill-opacity: var(--wm-area-opacity);
+    stroke: var(--wm-fig-grid);
+    stroke-width: 1;
+  }
+  .wm-chunkmap .area.cat-1 { fill: var(--wm-cat-1); }
+  .wm-chunkmap .area.cat-2 { fill: var(--wm-cat-2); }
+  .wm-chunkmap .area.cat-3 { fill: var(--wm-cat-3); }
+  .wm-chunkmap .area.cat-4 { fill: var(--wm-cat-4); }
+  .wm-chunkmap .area.dim {
+    fill-opacity: 0.08;
+  }
+  .wm-chunkmap .border {
+    fill: none;
+    stroke: var(--wm-fig-text);
+    stroke-opacity: 0.75;
+    stroke-width: 2.5;
+    stroke-linecap: square;
+  }
+  .wm-chunkmap .touched {
+    fill: none;
+    stroke: var(--wm-fig-text);
+    stroke-width: 3;
+    rx: 4;
+  }
+  .wm-chunkmap .cell-label {
+    font: 700 34px var(--wm-font-display);
+    fill: var(--wm-fig-text);
+    opacity: 0.85;
+    text-anchor: middle;
+    dominant-baseline: central;
+    paint-order: stroke;
+    stroke: var(--wm-fig-node);
+    stroke-width: 6px;
+  }
+  .wm-chunkmap .dot {
+    fill: var(--wm-fig-text);
+    fill-opacity: 0.85;
+    stroke: var(--wm-fig-node);
+    stroke-width: 1.5;
+  }
+  .wm-chunkmap .dot[class*='cat-'] {
+    fill-opacity: 1;
+  }
+  .wm-chunkmap .dot.cat-1 { fill: var(--wm-cat-1); }
+  .wm-chunkmap .dot.cat-2 { fill: var(--wm-cat-2); }
+  .wm-chunkmap .dot.cat-3 { fill: var(--wm-cat-3); }
+  .wm-chunkmap .dot.cat-4 { fill: var(--wm-cat-4); }
+  .wm-chunkmap .dot.far {
+    opacity: 0.45;
+  }
+  .wm-chunkmap .dot.hit {
+    fill: var(--wm-fig-text);
+  }
+  .wm-chunkmap .reach {
+    fill: var(--wm-fig-node);
+    fill-opacity: 0.35;
+    stroke: var(--wm-fig-text);
+    stroke-width: 3;
+    stroke-dasharray: 9 6;
+  }
+  .wm-chunkmap .asker {
+    fill: var(--wm-role-bus);
+    stroke: var(--wm-fig-node);
+    stroke-width: 3.5;
+    r: 9;
+  }
+  .wm-chunkmap .moved {
+    fill: none;
+    stroke: var(--wm-fig-text);
+    stroke-width: 2;
+    animation: wm-moved 1.6s ease-out forwards;
+  }
+  @keyframes wm-moved {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+  .wm-chunkmap .map-label {
+    font: 600 22px var(--__sl-font);
+    fill: var(--wm-fig-text);
+  }
+  .wm-chunkmap:focus-visible {
+    outline: 3px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+  .wm-chunkmap-live[data-mode='query'] .wm-chunkmap {
+    cursor: crosshair;
+  }
+  :root {
+    --wm-area-opacity: 0.72;
+  }
+  :root[data-theme='light'] {
+    --wm-area-opacity: 0.4;
+  }
+  .wm-chunkmap-live .wm-legend {
+    justify-content: center;
+  }
+  .wm-pair {
+    display: grid;
+    gap: 1rem;
+  }
+  @media (min-width: 36rem) {
+    .wm-pair {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .wm-pair-label {
+    margin: 0.55rem 0 0;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--wm-fig-text);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wm-chunkmap .moved {
+      animation-duration: 0.01s;
+      animation-delay: 1.5s;
+    }
+  }
+</style>
+
+<script>
+  import { LETTERS, PX, crowd, cellOwners, chunksTouched, plan, renderLegend, renderMap, SIZE } from './chunk-map';
+
+  for (const fig of document.querySelectorAll<HTMLElement>('.wm-chunkmap-live')) {
+    const mode = fig.dataset.mode as 'query' | 'scaling';
+    const svg = fig.querySelector<SVGSVGElement>('svg')!;
+    const readout = fig.querySelector<HTMLElement>('[data-readout]')!;
+    const dots = crowd();
+    let groups = Number(fig.dataset.groups);
+    let cells = Number(fig.dataset.cells);
+    let colorBy: 'groups' | 'cells' = 'groups';
+    let groupOf = plan(dots, groups, new Map());
+    let moved = new Set<number>();
+    const query = JSON.parse(fig.dataset.query!) as { x: number; y: number; r: number };
+
+    const names = (ids: number[]) => {
+      const l = ids.map((i) => LETTERS[i]);
+      return l.length === 1 ? `cell ${l[0]}` : `cells ${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
+    };
+
+    function draw() {
+      if (mode === 'query') {
+        svg.innerHTML = renderMap(dots, { colorBy: 'cells', cells, query });
+        const owners = cellOwners(cells);
+        const asked = [...new Set(chunksTouched(query.x, query.y, query.r).map((c) => owners[c]))].sort();
+        const near = dots.filter((d) => Math.hypot(d.x - query.x, d.y - query.y) <= query.r).length;
+        readout.textContent = `The question goes to ${names(asked)}. ${near} entities are within ${query.r} tiles.`;
+      } else {
+        svg.innerHTML = renderMap(dots, { colorBy, cells, groupOf, moved });
+        fig.querySelector('[data-legend]')!.innerHTML = renderLegend(dots, { colorBy, cells, groupOf });
+      }
+      fig.querySelector('[data-out="cells"]')!.textContent = String(cells);
+      const g = fig.querySelector('[data-out="groups"]');
+      if (g) g.textContent = String(groups);
+    }
+
+    function setGroups(next: number) {
+      if (next < 1 || next > 4 || next === groups) return;
+      const before = groupOf;
+      groups = next;
+      groupOf = plan(dots, groups, before);
+      moved = new Set(dots.filter((d) => before.get(d.id) !== groupOf.get(d.id)).map((d) => d.id));
+      const pct = Math.round((moved.size / dots.length) * 100);
+      readout.textContent = `${groups} groups: ${moved.size} of ${dots.length} entities were handed off (${pct}%). The rest stayed put.`;
+      if (colorBy !== 'groups') setColor('groups');
+      draw();
+    }
+
+    function setCells(next: number) {
+      if (next < 1 || next > 4 || next === cells) return;
+      cells = next;
+      moved = new Set();
+      if (mode === 'scaling') {
+        readout.textContent = `${cells} cells: the areas were re-split along the curve. Nothing was handed off; groups just report to the new owners.`;
+        if (colorBy !== 'cells') setColor('cells');
+      }
+      draw();
+    }
+
+    function setColor(c: 'groups' | 'cells') {
+      colorBy = c;
+      moved = new Set();
+      for (const b of fig.querySelectorAll<HTMLButtonElement>('[data-color]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.color === c));
+      }
+      draw();
+    }
+
+    fig.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+      if (!b) return;
+      if (b.dataset.color) setColor(b.dataset.color as 'groups' | 'cells');
+      if (b.dataset.step) {
+        const [what, by] = b.dataset.step.split(':');
+        if (what === 'groups') setGroups(groups + Number(by));
+        else setCells(cells + Number(by));
+      }
+    });
+
+    if (mode === 'query') {
+      const radius = fig.querySelector<HTMLInputElement>('[data-radius]')!;
+      radius.addEventListener('input', () => {
+        query.r = Number(radius.value);
+        fig.querySelector('[data-out="radius"]')!.textContent = `${query.r} tiles`;
+        draw();
+      });
+      const moveTo = (x: number, y: number) => {
+        query.x = Math.round(Math.min(SIZE - 0.5, Math.max(0.5, x)) * 2) / 2;
+        query.y = Math.round(Math.min(SIZE - 0.5, Math.max(0.5, y)) * 2) / 2;
+        draw();
+      };
+      svg.addEventListener('pointerdown', (e) => {
+        const m = svg.getScreenCTM();
+        if (!m) return;
+        const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse());
+        moveTo(p.x / PX, p.y / PX);
+      });
+      svg.addEventListener('keydown', (e) => {
+        const step: Record<string, [number, number]> = {
+          ArrowUp: [0, -2],
+          ArrowDown: [0, 2],
+          ArrowLeft: [-2, 0],
+          ArrowRight: [2, 0],
+        };
+        const d = step[e.key];
+        if (!d) return;
+        e.preventDefault();
+        moveTo(query.x + d[0], query.y + d[1]);
+      });
+    }
+    draw();
+  }
+</script>

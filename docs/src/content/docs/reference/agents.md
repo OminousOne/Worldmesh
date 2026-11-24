@@ -3,7 +3,7 @@ title: For AI agents
 description: Machine-readable docs, agent skills, and the rules an agent should follow when building on Worldmesh.
 ---
 
-Worldmesh is written to be easy for coding agents to build on, as well as people.
+Worldmesh is built to be easy for coding agents to build on, as well as people.
 
 ## Machine-readable docs
 
@@ -34,7 +34,7 @@ The mistakes an agent is most likely to make, and what to do instead:
 1. **Worldmesh is only the networking.** It has no health, movement or anything else a game needs: add them as components, systems and handlers in your own plugins. Don't look for them in the library.
 2. **Game code only runs in systems and command or action handlers, through `Me`,** and changes only the entity it runs for. There's no global world to reach into; another entity may be on another machine.
 3. **Change other entities only with actions** (`me.send`). Never keep references to other entities, or state about them outside your own entity's components.
-4. **Actions land on the next tick, exactly once, wherever the target is.** Don't add your own retries, acks or delays.
+4. **Actions land on the next tick, wherever the target is, and never twice.** Don't add your own retries, acks or delays.
 5. **Check actions on the receiving side with `Incoming::from` and `me.position_at(from.from.tick)`.** Never trust positions or ids a client put in a command or input.
 6. **Seed randomness from (entity id, tick).** An entity can move to another group at any tick and must decide the same thing there.
 7. **Make visible only what others need, and ask only for what you'll read** (`Query::with::<T>()`): views and answers dominate traffic in crowds.

@@ -18,7 +18,7 @@ https://ominousone.github.io/Worldmesh/ (machine-readable: `/llms.txt`, `/llms-f
 | `packages/debug` | `@worldmesh/debug` (TypeScript): the debug panel, metrics and bus view |
 | `examples/hello` | Tag: the smallest complete game (server only) |
 | `examples/medieval` | A full game: `server/` (Rust) and `client/` (Pixi), with Docker files |
-| `docs` | The documentation site (Astro Starlight); pages in `docs/src/content/docs`, the landing page's hero and map in `docs/src/components`, colors and fonts in `docs/src/styles/theme.css` |
+| `docs` | The documentation site (Astro Starlight); pages in `docs/src/content/docs`, the landing page and the interactive diagrams in `docs/src/components` (diagrams port the library's own logic, so keep them in step), colors and fonts in `docs/src/styles/theme.css` |
 | `skills` | Agent skills for building on Worldmesh (linked from `.claude/skills`) |
 
 ## Commands

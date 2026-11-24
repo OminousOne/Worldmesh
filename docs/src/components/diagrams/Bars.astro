@@ -1,0 +1,105 @@
+---
+// A small horizontal bar chart: one measure, labelled directly. The highlighted bar is the one
+// the text is about.
+interface Row {
+  label: string;
+  value: number;
+  /** Draw attention: "hot" for a cost, "good" for a saving. */
+  highlight?: 'hot' | 'good';
+}
+interface Props {
+  title: string;
+  unit: string;
+  rows: Row[];
+  caption?: string;
+}
+const { title, unit, rows, caption } = Astro.props;
+const max = Math.max(...rows.map((r) => r.value));
+const fmt = (v: number) => (v >= 10 ? v.toFixed(0) : v.toFixed(1));
+---
+
+<figure class="wm-figure not-content wm-bars">
+  <p class="title">{title}</p>
+  <table>
+    <thead class="sr-only">
+      <tr><th>What</th><th>{unit}</th></tr>
+    </thead>
+    <tbody>
+      {
+        rows.map((r) => (
+          <tr class:list={[r.highlight, { highlight: r.highlight }]}>
+            <th scope="row">{r.label}</th>
+            <td>
+              <span class="track">
+                <span class="bar" style={`width: ${Math.max(0.6, (r.value / max) * 100)}%`} />
+                <span class="value">
+                  {fmt(r.value)} {unit}
+                </span>
+              </span>
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<style>
+  .title {
+    margin: 0 0 0.75rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--wm-fig-text);
+  }
+  table {
+    display: table;
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  th,
+  td {
+    padding: 0.35rem 0;
+    border: 0;
+    background: none;
+    vertical-align: middle;
+  }
+  th {
+    width: 38%;
+    padding-inline-end: 1rem;
+    text-align: start;
+    font-weight: 600;
+    color: var(--wm-fig-text);
+  }
+  .track {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .bar {
+    height: 0.9rem;
+    border-radius: 0 4px 4px 0;
+    background: var(--wm-fig-muted);
+    opacity: 0.7;
+  }
+  .highlight .bar {
+    opacity: 1;
+  }
+  .hot .bar {
+    background: var(--wm-role-action);
+  }
+  .good .bar {
+    background: var(--wm-role-cell);
+  }
+  .value {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    color: var(--sl-color-gray-2);
+  }
+  .highlight .value {
+    color: var(--wm-fig-text);
+    font-weight: 700;
+  }
+</style>

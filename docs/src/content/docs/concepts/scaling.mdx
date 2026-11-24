@@ -3,16 +3,26 @@ title: Scaling and handoffs
 description: Adding and removing groups and cells while the world runs, and how entities move between groups.
 ---
 
-## Two dials
+import ChunkMap from '../../../components/diagrams/ChunkMap.astro';
 
-- **Groups in use**: how many Server Entity Groups share the entities. This is the simulation's capacity. Group processes start as many groups as they're asked for, so this has no fixed limit (a safety cap of 1,000).
-- **Cells in use**: how many Spatial Layer Cells share the map. This is the capacity for questions, area actions and views. Capped at how many cell processes are running.
+Two numbers set a world's capacity, and both can change while it runs:
 
-Today both are set by hand: the orchestrator's `--groups` and `--spatial` at start, then live from the [debug panel](/Worldmesh/guides/debug-panel/). Automatic scaling (from the load numbers each process already reports) is on the roadmap.
+- **Groups in use**: how many Server Entity Groups share the entities. This is the capacity for simulation. Group processes start as many groups as they're asked for, up to 1,000 in use.
+- **Cells in use**: how many Spatial Layer Cells share the map. This is the capacity for questions, area actions and views, up to the number of cell processes running.
+
+You set both by hand for now: `--groups` and `--spatial` on the orchestrator at start, then live from the [debug panel](/Worldmesh/guides/debug-panel/). Automatic scaling, from the load every process already reports, is on the roadmap.
+
+Try both. This is the orchestrator's own splitting logic, running on 130 entities:
+
+<ChunkMap mode="scaling" groups={3} cells={3} />
 
 ## Changing the number of groups
 
-Raising it starts new groups on the group processes running the fewest. Once all are up, the orchestrator re-splits every entity (by count, neighbours together, as few moving as possible: adding a fourth group to three moves about a quarter of the entities) and tells each group which entities to release.
+Raising it starts new groups on the group processes running the fewest. Once they're up, the orchestrator re-splits every entity and tells each group which ones to release:
+
+1. Sort the entities along a [Hilbert curve](https://en.wikipedia.org/wiki/Hilbert_curve): a path through every tile that keeps neighbors close together.
+2. Cut the sorted list into equal runs, one per group. Each group gets the same number of entities, in a compact patch.
+3. Give each run to the group that already holds most of it, so as few entities as possible move. Adding a fourth group to three moves about a quarter of them.
 
 Lowering it hands every entity of the groups taken out of use to the rest, and stops those groups once they've been empty for a few seconds.
 
@@ -20,20 +30,20 @@ Lowering it hands every entity of the groups taken out of use to the rest, and s
 
 When a group releases an entity:
 
-1. It finishes the tick (the entity is in that tick's report, so it never vanishes from view).
-2. It sends the entity's full record to the new group's inbox: its kind and every component (visible or not), plus Worldmesh's bookkeeping (the last tick it was simulated, its recent positions for `position_at`, which actions it already got, and any of its player's inputs not yet due).
-3. For a second, it keeps listening on the entity's subject and forwards anything that reaches it to the new group.
+1. It finishes the tick, so the entity is in that tick's report and never vanishes from view.
+2. It sends the entity's full record to the new group: its kind and every component, visible or not, plus Worldmesh's bookkeeping (the last tick it was simulated, its recent positions for `position_at`, the actions it already got, and its player's inputs not yet due).
+3. For a second, it keeps listening for the entity and forwards anything that arrives to the new group.
 
-The new group starts simulating it from the next tick (never the same tick twice: it skips any tick the old group already ran). The player sees nothing: no pause, no lost input, no action applied twice.
+The new group simulates it from the next tick, never repeating a tick the old group already ran. The player sees nothing: no pause, no lost input, no action applied twice.
 
 ## Changing the number of cells
 
-Cells are re-split along the Hilbert curve of chunks. Nothing is handed off: groups send their next reports to the new owners, and cells rebuild everything from those reports every tick anyway.
+Cells own equal runs of chunks along a Hilbert curve, so each cell's area is compact. Changing the count re-splits the runs. Nothing is handed off: groups send their next reports to the new owners, and cells rebuild everything from the reports every tick anyway.
 
 ## When a process dies
 
-- A **group** that stops sending heartbeats for 3 seconds is dropped. Its entities are gone with it; players are re-joined by the gateway (a player missing from their own view for 3 seconds is placed again).
-- A **cell** that stops is dropped and its area re-split among the rest.
-- **Gateways** are stateless apart from their connections: players reconnect.
+- A **group** that sends no heartbeat for 3 seconds is dropped, and its entities with it. Its players are placed again: the gateway re-joins a player missing from their own view for 3 seconds.
+- A **cell** that stops is dropped, and its area is re-split among the rest.
+- A **gateway** keeps nothing but connections, so its players reconnect.
 
-There's no persistence yet, so a dead group's bots and monsters don't come back. That's on the roadmap too.
+There's no persistence yet, so a dead group's bots and monsters don't come back.

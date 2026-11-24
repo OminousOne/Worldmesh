@@ -16,10 +16,13 @@ type Commands = { use: { ability: string }; clear_bots: null };
 ```
 
 ```ts
-new WorldmeshClient(options: ClientOptions<S, I, V>, handlers?: ClientHandlers<V, E, W>)
+new WorldmeshClient(
+  options: ClientOptions<S, I, V>,
+  handlers?: ClientHandlers<V, E, W>,
+)
 ```
 
-| Option | Default | |
+| Option | Default | What it does |
 | --- | --- | --- |
 | `url` | required | The gateway's WebSocket URL |
 | `compact` | `true` | Binary snapshots with only what changed |
@@ -40,9 +43,9 @@ new WorldmeshClient(options: ClientOptions<S, I, V>, handlers?: ClientHandlers<V
 
 More handlers can be added later with `client.listen(handlers)`, and listeners for one kind of event with `client.on(name, fn)`.
 
-| Member | |
+| Member | What it is |
 | --- | --- |
-| `connect()`, `close()` | |
+| `connect()`, `close()` | Opens and closes the connection |
 | `me` | Your entity's id (-1 until the welcome) |
 | `entities` | `Map<id, Tracked<V>>`: `state` (the newest `SnapshotEntity`: `id`, `x`, `y`, `group`, `spatial`, `player`, `kind`, `view`), `samples`, `lastSeen` |
 | `positionOf(id, renderTime?)` | Where to draw an entity this frame: yours predicted, others interpolated |
@@ -51,22 +54,26 @@ More handlers can be added later with `client.listen(handlers)`, and listeners f
 | `sendInput(input)` | Predicted at once, sent for the right tick and sub-step |
 | `sendCommand(name, data)` | A command for your entity, by name |
 | `on(name, fn)` | `fn(data, event)` for every event named `name`; returns a function that stops it |
-| `setSettings({ compact?, debug? })` | |
+| `setSettings({ compact?, debug? })` | Switches compact snapshots and debug traffic |
 | `sendDebug(command)` | Scaling, regroup, bus encoding, fake lag (`--allow-debug` gateways) |
 | `fakeLatency`, `fakeJitter` | Simulated delay on everything sent and received (ms) |
 | `predictor` | The `Predictor`, if prediction is on: `enabled`, `lead`, `stats`, `tick`, `predicted` |
-| `world`, `welcome`, `assignment`, `tickMs`, `status`, `lastTick` | |
+| `world`, `welcome`, `assignment`, `tickMs`, `status`, `lastTick` | The latest of each, as received |
 | `takeMeter()` | Bytes and messages both ways, and time spent, since the last call |
 
 ### `PredictionRules<S, I, V>`
 
 ```ts
 interface PredictionRules<S, I, V> {
-  idle: I;                                            // the input held before any is sent
-  fromServer(entity: SnapshotEntity<V>, held: I): S;  // your state from the server's word, plus the held input
-  simulateTick(state: S, changes: Timed<I>[], untilSub?: number): S; // exactly your server's movement
+  /** The input held before any is sent. */
+  idle: I;
+  /** Your state from the server's word on your entity, plus the input held. */
+  fromServer(entity: SnapshotEntity<V>, held: I): S;
+  /** One tick, or its first `untilSub` sub-steps: exactly your server's movement. */
+  simulateTick(state: S, changes: Timed<I>[], untilSub?: number): S;
   position(state: S): { x: number; y: number };
-  isIdle?(input: I): boolean;                         // default: it is `idle`
+  /** Default: whether it equals `idle`. */
+  isIdle?(input: I): boolean;
 }
 ```
 
@@ -80,7 +87,7 @@ interface PredictionRules<S, I, V> {
 new DebugPanel(options: DebugPanelOptions)
 ```
 
-| Option | |
+| Option | What it does |
 | --- | --- |
 | `client` | Your `WorldmeshClient` |
 | `parent` | Where to put the panels (default `document.body`) |
@@ -88,12 +95,12 @@ new DebugPanel(options: DebugPanelOptions)
 | `onOverlay(overlay, on)` | An overlay was switched |
 | `traceNote(event)` | What one of your events (`{ name, data }`) says about its trace, for the bus view |
 
-| Member | |
+| Member | What it is |
 | --- | --- |
 | `overlays` | `{ groups, spatial, senses, view, ghosts }` |
 | `set(name, on)` | Switch an overlay, or `compact`, `binaryBus`, `predict`, `metrics`, `bus` |
 | `groupColor(id)`, `groupName(id)`, `spatialName(id)`, `processName(id)`, `short(id)` | Matching the legends |
-| `groupIndex(id)`, `spatialIndex(id)`, `lagOf(group)` | |
+| `groupIndex(id)`, `spatialIndex(id)`, `lagOf(group)` | A group's or cell's position in the legends, and a group's fake lag |
 | `addSection(title)` | An element for your own controls |
 | `recordFrame(ms)` | Your frame's main-thread time, for the metrics |
 | `minimap` | A canvas shown while the view overlay is on |

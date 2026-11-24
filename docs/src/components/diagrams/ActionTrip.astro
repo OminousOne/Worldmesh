@@ -1,0 +1,219 @@
+---
+// An arrow from an archer to a knight in another group: sent on tick n, handled on tick n + 1.
+// The second scenario hands the knight to a third group as the arrow flies.
+const scenarios = {
+  groups: {
+    label: 'Different groups',
+    text: "The archer's group sends Hit on tick n. It crosses the bus and reaches the knight's group before tick n + 1, which hands it to the knight's handler. The handler judges it by where both stood on tick n.",
+  },
+  handoff: {
+    label: 'Mid-handoff',
+    text: "At the end of tick n, the knight moves to Group 3. Group 2 keeps listening for a second and forwards the Hit, and Group 3 may hear it directly too. Group 3 drops the copy, so the handler runs once, still on tick n + 1.",
+  },
+};
+---
+
+<figure class="wm-figure not-content wm-actiontrip" data-scenario="groups">
+  <svg viewBox="0 0 720 300" role="img" aria-label="An action sent on tick n from Group 1 and handled on tick n + 1 in the target's group">
+    <defs>
+      <marker id="wm-trip-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 10 5 0 10z" />
+      </marker>
+    </defs>
+    <g class="ticks">
+      <rect x="130" y="8" width="270" height="284" rx="10" />
+      <rect x="410" y="8" width="290" height="284" rx="10" />
+      <text x="265" y="30">tick n</text>
+      <text x="555" y="30">tick n + 1</text>
+    </g>
+    <g class="rows">
+      <text x="16" y="74">Group 1</text>
+      <text class="bus-label" x="16" y="146">NATS</text>
+      <text x="16" y="208">Group 2</text>
+      <text class="only-handoff" x="16" y="266">Group 3</text>
+      <line class="bus" x1="130" y1="142" x2="700" y2="142" />
+    </g>
+
+    <g class="pill sender">
+      <rect x="150" y="54" width="230" height="30" rx="15" />
+      <text x="265" y="74">archer: me.send(knight, Hit)</text>
+    </g>
+
+    <g class="only-groups">
+      <path id="wm-trip-a" class="trip" d="M300 84 C300 142 330 142 380 142 L455 142 C500 142 515 160 515 188" marker-end="url(#wm-trip-arrow)" />
+      <g class="pill target">
+        <rect x="430" y="190" width="250" height="30" rx="15" />
+        <text x="555" y="210">knight: Hit handler runs</text>
+      </g>
+    </g>
+
+    <g class="only-handoff">
+      <g class="pill handoff">
+        <rect x="200" y="190" width="190" height="30" rx="15" />
+        <text x="295" y="210">hands knight to Group 3</text>
+      </g>
+      <path class="handoff-line" d="M392 205 C405 205 405 262 418 262" marker-end="url(#wm-trip-arrow)" />
+      <path id="wm-trip-b" class="trip" d="M300 84 C300 142 330 142 380 142 L470 142 C520 142 530 210 540 246" marker-end="url(#wm-trip-arrow)" />
+      <path id="wm-trip-c" class="trip copy" d="M430 142 C450 142 466 160 466 204 C466 226 480 238 492 246" marker-end="url(#wm-trip-arrow)" />
+      <circle class="relay" cx="466" cy="204" r="5" />
+      <text class="note" x="478" y="208">Group 2 forwards it</text>
+      <g class="pill target">
+        <rect x="430" y="248" width="250" height="30" rx="15" />
+        <text x="555" y="268">knight: Hit handler runs once</text>
+      </g>
+    </g>
+  </svg>
+  <p class="wm-figure-readout" data-readout>{scenarios.groups.text}</p>
+  <div class="wm-figure-controls">
+    <div class="wm-segmented" role="group" aria-label="Scenario">
+      {
+        Object.entries(scenarios).map(([key, s], i) => (
+          <button class="wm-btn" type="button" data-scenario={key} data-text={s.text} aria-pressed={i === 0 ? 'true' : 'false'}>
+            {s.label}
+          </button>
+        ))
+      }
+    </div>
+    <button class="wm-btn primary" type="button" data-send hidden>Send the arrow</button>
+  </div>
+</figure>
+
+<style>
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .ticks rect {
+    fill: var(--wm-fig-node);
+    stroke: var(--wm-fig-grid);
+  }
+  .ticks text {
+    font: 700 13px var(--__sl-font);
+    fill: var(--wm-fig-muted);
+    text-anchor: middle;
+  }
+  .rows text {
+    font: 700 13px var(--__sl-font);
+    fill: var(--wm-role-group);
+  }
+  .rows text.bus-label {
+    fill: var(--wm-role-bus);
+  }
+  .bus {
+    stroke: var(--wm-role-bus);
+    stroke-width: 6;
+    stroke-linecap: round;
+    opacity: 0.4;
+  }
+  .pill rect {
+    fill: var(--wm-fig-bg);
+    stroke: var(--wm-fig-line);
+    stroke-width: 1.5;
+  }
+  .pill text {
+    font: 600 12.5px var(--__sl-font-mono);
+    fill: var(--wm-fig-text);
+    text-anchor: middle;
+  }
+  .pill.sender rect {
+    stroke: var(--wm-role-group);
+    stroke-width: 2;
+  }
+  .pill.target rect {
+    stroke: var(--wm-role-action);
+    stroke-width: 2.5;
+    fill: color-mix(in oklab, var(--wm-role-action) 16%, var(--wm-fig-bg));
+  }
+  .pill.handoff rect {
+    stroke: var(--wm-role-orch);
+    stroke-dasharray: 4 4;
+  }
+  .pill.handoff text {
+    fill: var(--wm-role-orch);
+  }
+  .trip {
+    fill: none;
+    stroke: var(--wm-role-action);
+    stroke-width: 3;
+  }
+  .trip.copy {
+    stroke-dasharray: 6 5;
+    stroke-width: 2;
+    opacity: 0.8;
+  }
+  .handoff-line {
+    fill: none;
+    stroke: var(--wm-role-orch);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 4;
+  }
+  .relay {
+    fill: var(--wm-role-group);
+    stroke: var(--wm-fig-node);
+    stroke-width: 2;
+  }
+  .note {
+    font: 600 11.5px var(--__sl-font);
+    fill: var(--wm-fig-muted);
+  }
+  marker path {
+    fill: var(--wm-role-action);
+  }
+  .wm-actiontrip[data-scenario='groups'] .only-handoff,
+  .wm-actiontrip[data-scenario='handoff'] .only-groups {
+    display: none;
+  }
+  :global(.wm-actiontrip .packet) {
+    fill: var(--wm-role-action);
+    stroke: var(--wm-fig-text);
+    stroke-width: 2.5;
+  }
+</style>
+
+<script>
+  const SVG = 'http://www.w3.org/2000/svg';
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+
+  for (const fig of document.querySelectorAll<HTMLElement>('.wm-actiontrip')) {
+    const svg = fig.querySelector('svg')!;
+    const readout = fig.querySelector<HTMLElement>('[data-readout]')!;
+    const send = fig.querySelector<HTMLButtonElement>('[data-send]')!;
+    if (!still.matches) send.hidden = false;
+
+    function fly() {
+      svg.querySelectorAll('.packet').forEach((p) => p.remove());
+      if (still.matches) return;
+      const paths = fig.dataset.scenario === 'groups' ? ['wm-trip-a'] : ['wm-trip-b', 'wm-trip-c'];
+      for (const id of paths) {
+        const dot = document.createElementNS(SVG, 'circle');
+        dot.setAttribute('r', '6');
+        dot.setAttribute('class', 'packet');
+        const move = document.createElementNS(SVG, 'animateMotion');
+        move.setAttribute('dur', id === 'wm-trip-c' ? '1.6s' : '1.3s');
+        move.setAttribute('fill', 'freeze');
+        move.setAttribute('begin', 'indefinite');
+        const mpath = document.createElementNS(SVG, 'mpath');
+        mpath.setAttribute('href', `#${id}`);
+        move.append(mpath);
+        dot.append(move);
+        svg.append(dot);
+        (move as SVGAnimationElement).beginElement();
+      }
+    }
+
+    fig.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+      if (!b) return;
+      if (b.dataset.scenario) {
+        fig.dataset.scenario = b.dataset.scenario;
+        readout.textContent = b.dataset.text!;
+        for (const o of fig.querySelectorAll<HTMLButtonElement>('[data-scenario]')) {
+          if (o.tagName === 'BUTTON') o.setAttribute('aria-pressed', String(o === b));
+        }
+        fly();
+      }
+      if (b.hasAttribute('data-send')) fly();
+    });
+  }
+</script>

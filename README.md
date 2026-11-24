@@ -17,7 +17,7 @@ Worldmesh is the networking, and none of the game. Every entity gets an id, a po
 - **an orchestrator**, which decides who owns what;
 - **gateways**, which hold players' WebSockets;
 
-all talking over [NATS](https://nats.io). An action sent to an entity on another machine, even one moving between servers, lands exactly once on the next tick.
+all talking over [NATS](https://nats.io). An action sent to an entity on another machine, even one moving between servers, lands on the next tick and is never applied twice.
 
 ```rust
 #[derive(Component, Clone, Copy, PartialEq, Serialize, Deserialize)]

@@ -3,40 +3,52 @@ title: Ticks, inputs and prediction
 description: The shared clock, inputs timed to a sub-step, and how the client predicts its own entity exactly.
 ---
 
+import PredictionDemo from '../../../components/diagrams/PredictionDemo.astro';
+
 ## One clock
 
-Every process ticks on the same clock: tick `n` is `n × tick_ms` milliseconds after a fixed epoch, so processes agree on the current tick without talking to each other (keep their clocks in sync with NTP, as any server would). The rate is set with `--tick-hz` (or `TICK_HZ`), default 10, and must be the same everywhere.
+Every process ticks on the same clock: tick `n` starts `n × tick_ms` after a fixed epoch. So processes agree on the current tick without talking to each other, as long as their clocks are in sync (use NTP, as for any server). Set the rate with `--tick-hz` or `TICK_HZ`. The default is 10 per second, and it must be the same in every process.
 
 ## Inputs at a sub-step
 
-A player's input (the type registered with `world.input::<Move>()`) is "what I'm holding from now on": a direction, buttons. Each tick is split into `WorldConfig::input_substeps` sub-steps (16 in the examples), and every input names the exact tick and sub-step it takes effect at. A system reads the inputs due during this tick, in order:
+A player's input is what they're holding from now on: a direction, some buttons. Register its type with `world.input::<Walk>()`, one per world.
+
+Each tick is split into sub-steps (`input_substeps` in `WorldConfig`, 16 in the examples), and every input names the tick and sub-step it takes effect at. A system reads the inputs due this tick, in order:
 
 ```rust
 fn walk(me: &mut Me<'_>) {
-    for t in me.inputs::<Move>() {
-        // t.sub: the sub-step it takes effect at; t.input: your Move
+    for t in me.inputs::<Walk>() {
+        // t.sub: the sub-step it takes effect at. t.input: your Walk.
     }
 }
 ```
 
-What an input does is up to your game: Worldmesh only gets it to the right entity at the right moment.
+So releasing a key halfway through a tick stops you halfway through it, not at the next tick. What an input does is up to your game: Worldmesh gets it to the right entity at the right moment.
 
-Releasing a key half way through a tick stops you half way through, not at a tick boundary.
+The gateway applies each input when it says, if it arrives in time:
 
-The gateway applies each input exactly when it says, if it arrives in time. An input that arrives too late for its moment is applied as soon as possible instead (the next tick, sub-step 0), and inputs more than 5 seconds ahead are pulled in. An input sent for tick 0 means "as soon as possible".
+- An input too late for its moment is applied as soon as possible: sub-step 0 of the next tick.
+- An input more than 5 seconds ahead is pulled in.
+- An input for tick 0 means "as soon as possible".
 
 ## Prediction
 
-Because the server applies each input at exactly the sub-step the client chose, a client running the same movement rules gets exactly the same positions. `@worldmesh/client` does this for your own entity:
+The server applies each input at exactly the sub-step the client chose, so a client running the same movement rules gets exactly the same positions. `@worldmesh/client` uses this to show your own entity without waiting for the server:
 
-1. It runs your entity ahead of the server clock by the **lead**.
-2. Each input is scheduled at the next sub-step on that clock, applied locally at once, and sent with its tick and sub-step.
-3. When the server's position for a tick comes back, it's compared with the prediction for that tick. Equal (within 0.0001 tiles): nothing to do. Different (an input arrived late, something pushed you): take the server's position for that tick, replay every input since, and glide to the result instead of jumping.
+1. It runs your entity ahead of the server clock by a **lead**.
+2. It schedules each input at the next sub-step on that clock, applies it locally at once, and sends it with its tick and sub-step.
+3. When the server's position for a tick comes back, it compares it with the prediction for that tick. If they match (within 0.0001 tiles), there's nothing to do. If not, because an input arrived late or something pushed you, it takes the server's position, replays every input since, and glides to the result instead of jumping.
 
-The lead adapts: the gateway acks each input with how early it arrived, and the lead is set so the worst input of the last 5 seconds would have arrived 15 ms early. Raising it is immediate; lowering it is gradual.
+The lead adapts. The gateway acknowledges each input with how early it arrived, and the client sets the lead so that even the least early input of the last 5 seconds would have arrived 15 ms early. Raising the lead is immediate; lowering it is gradual.
 
-For this to work, your client's movement code has to match the server's bit for bit. The medieval example keeps a TypeScript port of its Rust movement, rounding with `Math.fround` exactly where Rust does `f32` math, and `npm run parity` checks the two against each other on 20,000 random ticks at several tick rates.
+Try it: walk around, raise the delay, and switch prediction off.
 
-## Others: interpolation
+<PredictionDemo />
 
-Everyone else is drawn slightly in the past (one tick plus 50 ms), blended between the two snapshots around that moment. There's almost always a newer snapshot to blend toward, so others move smoothly even when a snapshot arrives late. A jump of more than 3 tiles between snapshots (a respawn) is drawn as a jump.
+Prediction relies on your client's movement code matching the server's bit for bit. The medieval example keeps a TypeScript port of its Rust movement that rounds with `Math.fround` exactly where Rust does `f32` math. `npm run parity` checks the two against each other on 20,000 random ticks at several tick rates.
+
+## Everyone else: interpolation
+
+Everyone else is drawn slightly in the past, one tick plus 50 ms behind the newest snapshot, blended between the two snapshots around that moment. There's almost always a newer snapshot to blend toward, so others move smoothly even when one arrives late. In the demo, turn on jitter and switch interpolation off to see the difference.
+
+A jump of more than 3 tiles between snapshots, like a respawn, is drawn as a jump.

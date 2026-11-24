@@ -1,0 +1,216 @@
+---
+// One entity's components on its server, and what a player's snapshot shows of it. Switch a
+// component between visible and hidden, or add and remove one, and watch the snapshot change.
+type Row = { name: string; rust: string; json: unknown; visible: boolean; present: boolean; note: string };
+const rows: Row[] = [
+  { name: 'health', rust: 'Health(80)', json: 80, visible: true, present: true, note: 'Everyone sees health bars' },
+  { name: 'heading', rust: 'Heading { dx: 1.0, dy: 0.0 }', json: { dx: 1, dy: 0 }, visible: false, present: true, note: 'Only movement needs it' },
+  { name: 'cooldowns', rust: 'Cooldowns(..)', json: [['bow', 1240]], visible: false, present: true, note: 'Nobody else needs to know' },
+  { name: 'dead', rust: 'Dead { until: 1290 }', json: { until: 1290 }, visible: true, present: false, note: 'Present only while dead' },
+];
+---
+
+<figure class="wm-figure not-content wm-visibility" data-rows={JSON.stringify(rows)}>
+  <div class="cols">
+    <div>
+      <p class="head"><span class="chip group" />On its group: entity 3, a <code>hero</code></p>
+      <ul class="rows">
+        {
+          rows.map((r, i) => (
+            <li data-row={i} class:list={{ absent: !r.present }}>
+              <div class="what">
+                <code>{r.rust}</code>
+                <span class="note">{r.note}</span>
+              </div>
+              <div class="switches">
+                <button class="wm-btn" type="button" data-vis={i} aria-pressed={String(r.visible)}>
+                  {r.visible ? 'Visible' : 'Hidden'}
+                </button>
+                {r.name === 'dead' && (
+                  <button class="wm-btn" type="button" data-present={i}>
+                    {r.present ? 'Revive' : 'Kill'}
+                  </button>
+                )}
+              </div>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+    <div class="snapshot">
+      <p class="head"><span class="chip player" />In the snapshot of a player who can see it</p>
+      <pre data-json></pre>
+    </div>
+  </div>
+  <p class="wm-figure-readout">
+    Hidden components never leave the entity's group, except to move with it in a handoff. A
+    visible one is sent only when its bytes change, on its own.
+  </p>
+</figure>
+
+<style>
+  .cols {
+    display: grid;
+    gap: 1.25rem;
+  }
+  @media (min-width: 44rem) {
+    .cols {
+      grid-template-columns: 1.15fr 1fr;
+    }
+  }
+  .head {
+    margin: 0 0 0.6rem;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--wm-fig-text);
+  }
+  .chip {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin-inline-end: 0.45rem;
+    border-radius: 50%;
+  }
+  .chip.group {
+    background: var(--wm-role-group);
+  }
+  .chip.player {
+    background: var(--wm-role-player);
+  }
+  .switches .wm-btn[data-vis][aria-pressed='true'] {
+    background: var(--wm-role-cell);
+    border-color: var(--wm-role-cell);
+    color: #0b2430;
+  }
+  .switches .wm-btn[data-present] {
+    border-color: var(--wm-role-action);
+    color: var(--wm-role-action);
+  }
+  .head code,
+  .what code {
+    font: 0.85rem/1.4 var(--__sl-font-mono);
+  }
+  .rows {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.5rem;
+  }
+  .rows li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 10px;
+    background: var(--wm-fig-node);
+    border: 1px solid var(--wm-fig-line);
+    transition: opacity 0.2s;
+  }
+  .rows li.absent .what {
+    opacity: 0.4;
+    text-decoration: line-through;
+  }
+  .what {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+  .what code {
+    color: var(--wm-fig-text);
+    overflow-wrap: anywhere;
+  }
+  .note {
+    font-size: 0.8rem;
+    color: var(--wm-fig-muted);
+  }
+  .switches {
+    display: flex;
+    gap: 0.35rem;
+    flex: none;
+  }
+  .switches .wm-btn {
+    height: 1.9rem;
+    padding: 0 0.7rem;
+    font-size: 0.8rem;
+  }
+  .snapshot {
+    display: flex;
+    flex-direction: column;
+  }
+  pre {
+    flex: 1;
+    margin: 0;
+    padding: 0.9rem 1rem;
+    border-radius: 10px;
+    background: var(--wm-fig-node);
+    border: 1px solid var(--wm-fig-line);
+    font: 0.85rem/1.55 var(--__sl-font-mono);
+    color: var(--wm-fig-text);
+    white-space: pre-wrap;
+  }
+  pre :global(.flash) {
+    background: color-mix(in oklab, var(--wm-role-player) 28%, transparent);
+    outline: 1.5px solid var(--wm-role-player);
+    border-radius: 3px;
+  }
+</style>
+
+<script>
+  type Row = { name: string; json: unknown; visible: boolean; present: boolean };
+
+  for (const fig of document.querySelectorAll<HTMLElement>('.wm-visibility')) {
+    const rows = JSON.parse(fig.dataset.rows!) as Row[];
+    const pre = fig.querySelector<HTMLElement>('[data-json]')!;
+    let changed = '';
+
+    function render() {
+      const view = rows.filter((r) => r.visible && r.present);
+      const lines = [
+        '{',
+        '  "id": 3,',
+        '  "kind": "hero",',
+        '  "player": true,',
+        '  "x": 31.5,',
+        '  "y": 30.5,',
+        '  "group": 5,',
+        '  "spatial": 32769,',
+        '  "view": {',
+        ...view.map((r, i) => {
+          const line = `    "${r.name}": ${JSON.stringify(r.json)}${i < view.length - 1 ? ',' : ''}`;
+          return r.name === changed ? `<span class="flash">${line}</span>` : line;
+        }),
+        '  }',
+        '}',
+      ];
+      pre.innerHTML = lines.join('\n');
+      rows.forEach((r, i) => {
+        const li = fig.querySelector<HTMLElement>(`[data-row="${i}"]`)!;
+        li.classList.toggle('absent', !r.present);
+        const vis = li.querySelector<HTMLButtonElement>('[data-vis]')!;
+        vis.setAttribute('aria-pressed', String(r.visible));
+        vis.textContent = r.visible ? 'Visible' : 'Hidden';
+        const pres = li.querySelector<HTMLButtonElement>('[data-present]');
+        if (pres) pres.textContent = r.present ? 'Revive' : 'Kill';
+      });
+    }
+
+    fig.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+      if (!b) return;
+      if (b.dataset.vis) {
+        const r = rows[Number(b.dataset.vis)];
+        r.visible = !r.visible;
+        changed = r.name;
+      }
+      if (b.dataset.present) {
+        const r = rows[Number(b.dataset.present)];
+        r.present = !r.present;
+        changed = r.name;
+      }
+      render();
+    });
+    render();
+  }
+</script>

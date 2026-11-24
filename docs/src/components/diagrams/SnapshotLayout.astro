@@ -1,0 +1,159 @@
+---
+// The compact snapshot, laid out: its sections in order, and an entity's fields. Switch the
+// mask's bits to see which fields follow it, and how many bytes they take.
+const sections = [
+  { name: 'Header', tone: 'muted', parts: ['u8 kind (1, or 2 after a reset)', 'u64 tick'] },
+  { name: 'Entered', tone: 'cell', parts: ['u16 count', 'per entity: u32 id', 'u8 flags (bit 0: player)', 'u16 kind', 'fields, all of them'] },
+  { name: 'Updated', tone: 'gateway', parts: ['u16 count', 'per entity: u32 id', 'fields that changed'] },
+  { name: 'Left', tone: 'action', parts: ['u16 count', 'per entity: u32 id'] },
+  { name: 'Events', tone: 'player', parts: ['u16 count', 'per event: u16 message', 'u32 length', 'MessagePack'] },
+  { name: 'Debug', tone: 'orch', parts: ['u32 length', 'JSON: senses, bus, streams'] },
+];
+const bits = [
+  { bit: 1, name: 'POS', bytes: 'Yours: f32 x, f32 y (8 bytes). Others: u16 x, u16 y in steps of 1 / pos_scale (4 bytes).' },
+  { bit: 2, name: 'GROUP', bytes: 'u16 group (2 bytes)' },
+  { bit: 4, name: 'SPATIAL', bytes: 'u16 cell (2 bytes)' },
+  { bit: 8, name: 'PARTS', bytes: 'u8 count, then per new or changed component: u16 component, u32 length, MessagePack' },
+  { bit: 16, name: 'GONE', bytes: 'u8 count, then per removed component: u16 component' },
+];
+---
+
+<figure class="wm-figure not-content wm-snapshot">
+  <ol class="sections">
+    {
+      sections.map((s) => (
+        <li class={`tone-${s.tone}`}>
+          <span class="name">{s.name}</span>
+          <span class="parts">
+            {s.parts.map((p) => (
+              <code>{p}</code>
+            ))}
+          </span>
+        </li>
+      ))
+    }
+  </ol>
+  <p class="sub">An entity's fields: a <code>u8</code> mask, then whatever it says, in this order.</p>
+  <div class="mask" role="group" aria-label="Mask bits">
+    {
+      bits.map((b) => (
+        <button class="wm-btn" type="button" data-bit={b.bit} aria-pressed={b.bit === 1 || b.bit === 8 ? 'true' : 'false'}>
+          <span class="bitval">{b.bit}</span> {b.name}
+        </button>
+      ))
+    }
+  </div>
+  <p class="wm-figure-readout" data-mask-readout></p>
+  <ul class="fields" data-fields>
+    {bits.map((b) => <li data-bit={b.bit}><strong>{b.name}</strong> {b.bytes}</li>)}
+  </ul>
+</figure>
+
+<style>
+  .sections {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.4rem;
+  }
+  .sections li {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    border-radius: 10px;
+    background: var(--wm-fig-node);
+    border-inline-start: 5px solid var(--tone);
+  }
+  .tone-muted {
+    --tone: var(--wm-fig-muted);
+  }
+  .tone-cell {
+    --tone: var(--wm-role-cell);
+  }
+  .tone-gateway {
+    --tone: var(--wm-role-gateway);
+  }
+  .tone-action {
+    --tone: var(--wm-role-action);
+  }
+  .tone-player {
+    --tone: var(--wm-role-player);
+  }
+  .tone-orch {
+    --tone: var(--wm-role-orch);
+  }
+  .name {
+    font-weight: 700;
+    color: var(--wm-fig-text);
+  }
+  .parts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  code {
+    padding: 0.1rem 0.4rem;
+    border-radius: 5px;
+    background: var(--wm-fig-bg);
+    font: 0.8rem/1.5 var(--__sl-font-mono);
+    color: var(--wm-fig-text);
+  }
+  .sub {
+    margin: 1.1rem 0 0.6rem;
+    font-size: 0.9rem;
+    color: var(--wm-fig-text);
+  }
+  .mask {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .bitval {
+    opacity: 0.65;
+    margin-inline-end: 0.2rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .fields {
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.88rem;
+    color: var(--sl-color-gray-2);
+  }
+  .fields strong {
+    color: var(--wm-fig-text);
+    margin-inline-end: 0.35rem;
+  }
+  .fields li.off {
+    display: none;
+  }
+</style>
+
+<script>
+  for (const fig of document.querySelectorAll<HTMLElement>('.wm-snapshot')) {
+    const buttons = [...fig.querySelectorAll<HTMLButtonElement>('[data-bit]')].filter((b) => b.tagName === 'BUTTON');
+    const readout = fig.querySelector<HTMLElement>('[data-mask-readout]')!;
+    const fields = [...fig.querySelectorAll<HTMLElement>('[data-fields] li')];
+    function update() {
+      let mask = 0;
+      for (const b of buttons) if (b.getAttribute('aria-pressed') === 'true') mask |= Number(b.dataset.bit);
+      for (const f of fields) f.classList.toggle('off', (mask & Number(f.dataset.bit)) === 0);
+      const names = buttons.filter((b) => mask & Number(b.dataset.bit)).map((b) => b.textContent!.trim().split(' ').pop());
+      readout.textContent = mask
+        ? `Mask ${mask} (0b${mask.toString(2).padStart(5, '0')}): ${names.join(', ')} follow.`
+        : 'Mask 0: nothing follows. An entity standing still with nothing changed is left out entirely.';
+    }
+    for (const b of buttons) {
+      b.addEventListener('click', () => {
+        b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+        update();
+      });
+    }
+    update();
+  }
+</script>
