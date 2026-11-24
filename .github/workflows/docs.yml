@@ -30,6 +30,9 @@ jobs:
       - uses: withastro/action@v6
         with:
           path: ./docs
+          # Astro's build cache keeps pages rendered by the last build, which then link to code
+          # styles that no longer exist. The site builds in seconds without it.
+          cache: false
 
   deploy:
     needs: build
