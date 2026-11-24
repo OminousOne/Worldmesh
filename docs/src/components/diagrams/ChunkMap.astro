@@ -55,21 +55,24 @@ const query = { x: 26, y: 34, r: 9 };
       </div>
       <div class="wm-figure-controls">
         {mode === 'scaling' && (
-          <div class="wm-segmented" role="group" aria-label="Color by">
-            <button class="wm-btn" type="button" data-color="groups" aria-pressed="true">Groups</button>
-            <button class="wm-btn" type="button" data-color="cells" aria-pressed="false">Cells</button>
+          <div class="wm-stepper" role="group" aria-label="Color by">
+            <span>Color by</span>
+            <span class="wm-segmented">
+              <button class="wm-btn" type="button" data-color="groups" aria-pressed="true">Group</button>
+              <button class="wm-btn" type="button" data-color="cells" aria-pressed="false">Cell</button>
+            </span>
           </div>
         )}
         {mode === 'scaling' && (
           <div class="wm-stepper">
-            <span>Groups</span>
+            <span>Groups in use</span>
             <button class="wm-btn" type="button" data-step="groups:-1" aria-label="Remove a group">−</button>
             <output data-out="groups">{groups}</output>
             <button class="wm-btn" type="button" data-step="groups:1" aria-label="Add a group">+</button>
           </div>
         )}
         <div class="wm-stepper">
-          <span>Cells</span>
+          <span>Cells in use</span>
           <button class="wm-btn" type="button" data-step="cells:-1" aria-label="Remove a cell">−</button>
           <output data-out="cells">{cells}</output>
           <button class="wm-btn" type="button" data-step="cells:1" aria-label="Add a cell">+</button>
@@ -200,8 +203,12 @@ const query = { x: 26, y: 34, r: 9 };
   :root[data-theme='light'] {
     --wm-area-opacity: 0.4;
   }
-  .wm-chunkmap-live .wm-legend {
+  .wm-chunkmap-live .wm-legend,
+  .wm-chunkmap-live .wm-figure-controls {
     justify-content: center;
+  }
+  .wm-chunkmap-live .wm-figure-readout {
+    text-align: center;
   }
   .wm-pair {
     display: grid;

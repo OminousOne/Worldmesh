@@ -38,16 +38,16 @@ Add your own sections with `panel.addSection(title)`, which returns an element t
 
 | Key | Toggles |
 | --- | --- |
-| O | Color entities by group |
-| L | Spatial Layer Cell areas |
-| N | "What's near me?" questions |
-| V | Your view, on a minimap |
-| G | Raw server positions (ghosts) |
-| P | Prediction |
-| T | Compact snapshots |
-| I | MessagePack on the bus |
-| B | Bus view |
-| M | Metrics |
+| <kbd>O</kbd> | Color entities by group |
+| <kbd>L</kbd> | Spatial Layer Cell areas |
+| <kbd>N</kbd> | "What's near me?" questions |
+| <kbd>V</kbd> | Your view, on a minimap |
+| <kbd>G</kbd> | Raw server positions (ghosts) |
+| <kbd>P</kbd> | Prediction |
+| <kbd>T</kbd> | Compact snapshots |
+| <kbd>I</kbd> | MessagePack on the bus |
+| <kbd>B</kbd> | Bus view |
+| <kbd>M</kbd> | Metrics |
 
 ## Drawing overlays
 

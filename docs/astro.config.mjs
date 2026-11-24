@@ -31,6 +31,8 @@ export default defineConfig({
         PageTitle: './src/components/PageTitle.astro',
       },
       expressiveCode: {
+        // Shell snippets read better without an empty terminal title bar.
+        defaultProps: { overridesByLang: { 'sh,bash,shell': { frame: 'none' } } },
         styleOverrides: {
           borderRadius: '10px',
           codeFontFamily: 'var(--__sl-font-mono)',

@@ -56,37 +56,43 @@ async fn main() -> anyhow::Result<()> {
 my-game [--nats-url URL] [--tick-hz N] <ROLE> [OPTIONS]
 ```
 
-| Option | Environment | Default | What it sets |
-| --- | --- | --- | --- |
-| `--nats-url` | `NATS_URL` | `nats://127.0.0.1:4222` | The bus |
-| `--tick-hz` | `TICK_HZ` | `10` | Ticks per second; the same in every process |
+Every option can also be set with the environment variable under it.
+
+<div class="wm-aligned">
+
+| Option | What it sets |
+| --- | --- |
+| `--nats-url` <br /> `NATS_URL` | The bus. Default `nats://127.0.0.1:4222`. |
+| `--tick-hz` <br /> `TICK_HZ` | Ticks per second, the same in every process. Default `10`. |
 
 ### `orchestrator`
 
-| Option | Environment | Default | What it sets |
-| --- | --- | --- | --- |
-| `--groups` | `GROUPS` | `2` | Server Entity Groups in use at start |
-| `--spatial` | `SPATIAL` | `2` | Spatial Layer Cells in use at start, up to how many run |
+| Option | What it sets |
+| --- | --- |
+| `--groups` <br /> `GROUPS` | Server Entity Groups in use at start. Default `2`. |
+| `--spatial` <br /> `SPATIAL` | Spatial Layer Cells in use at start, up to how many run. Default `2`. |
 
 ### `group`
 
-| Option | Environment | Default | What it sets |
-| --- | --- | --- | --- |
-| `--group-id` | `GROUP_ID` | random | Id of the first group this process runs |
+| Option | What it sets |
+| --- | --- |
+| `--group-id` <br /> `GROUP_ID` | The id of the first group this process runs. Random by default. |
 
 ### `spatial`
 
-| Option | Environment | Default | What it sets |
-| --- | --- | --- | --- |
-| `--spatial-id` | `SPATIAL_ID` | random | This cell's id |
+| Option | What it sets |
+| --- | --- |
+| `--spatial-id` <br /> `SPATIAL_ID` | This cell's id. Random by default. |
 
 ### `gateway`
 
-| Option | Environment | Default | What it sets |
-| --- | --- | --- | --- |
-| `--listen` | `LISTEN` | `0.0.0.0:8080` | Players connect to `/ws`; `/health` answers `ok` |
-| `--nats-monitor` | `NATS_MONITOR` | none | NATS monitoring address (`host:8222`), to show NATS in the metrics |
-| `--allow-debug` | `ALLOW_DEBUG` | off | Accept debug panel commands (scaling, fake lag) from players. Development only. |
+| Option | What it sets |
+| --- | --- |
+| `--listen` <br /> `LISTEN` | Where players connect (`/ws`); `/health` answers `ok`. Default `0.0.0.0:8080`. |
+| `--nats-monitor` <br /> `NATS_MONITOR` | NATS's monitoring address (`host:8222`), to show NATS in the metrics. None by default. |
+| `--allow-debug` <br /> `ALLOW_DEBUG` | Accept debug panel commands (scaling, fake lag) from players. Off by default. Development only. |
+
+</div>
 
 ## Limits
 

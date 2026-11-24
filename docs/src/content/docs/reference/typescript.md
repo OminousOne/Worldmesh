@@ -79,7 +79,13 @@ interface PredictionRules<S, I, V> {
 
 ### Also exported
 
-`Predictor`, `SnapshotDecoder` and `isCompact` (to decode snapshots yourself), `sampleAt`, `isSpatial`, and the protocol types: `Welcome`, `Schema`, `Snapshot`, `SnapshotEntity`, `GameEvent`, `Named`, `Assignment`, `ProcessStats`, `SenseDebug`, `BusMsg`, `StreamMsg`, `WorldConfig`, `ViewShape`, `DebugCommand`, `ClientMsg`, `ServerMsg`.
+| Export | What it's for |
+| --- | --- |
+| `SnapshotDecoder`, `isCompact` | Decoding snapshots yourself |
+| `Predictor` | Predicting without the client |
+| `sampleAt(samples, t)` | A position between two samples, as `positionOf` draws others |
+| `isSpatial(id)` | Whether a process id is a Spatial Layer Cell's |
+| Protocol types | `Welcome`, `Schema`, `Snapshot`, `SnapshotEntity`, `GameEvent`, `Named`, `Assignment`, `ProcessStats`, `SenseDebug`, `BusMsg`, `StreamMsg`, `WorldConfig`, `ViewShape`, `DebugCommand`, `ClientMsg`, `ServerMsg` |
 
 ## `@worldmesh/debug`
 

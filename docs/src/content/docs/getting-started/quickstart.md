@@ -39,11 +39,11 @@ npm run dev -w medieval-client
 
 | Key | What it does |
 | --- | --- |
-| WASD, arrow keys, or hold the left mouse button | Walk |
-| Right-click a unit | Target it. Your weapon keeps firing while it's in reach. |
-| Q | Switch between sword and bow |
-| F | Throw a fireball at the cursor |
-| Esc | Drop your target |
+| <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or arrows | Walk. You can also hold the left mouse button. |
+| Right-click | Target a unit. Your weapon keeps firing while it's in reach. |
+| <kbd>Q</kbd> | Switch between sword and bow |
+| <kbd>F</kbd> | Throw a fireball at the cursor |
+| <kbd>Esc</kbd> | Drop your target |
 
 ## Look inside
 
@@ -54,8 +54,8 @@ The panel on the right is `@worldmesh/debug`. Try these:
 1. Under **Combat and bots**, spawn 200 bots that pick fights. A hit between units in different groups shows an orange note (`Group 1 → Group 2`): the arrow crossed the bus and still landed one tick later.
 2. Raise **Groups** to 4. Entities are re-split and handed off live. Their rings change color and nobody stops moving.
 3. Raise **Spatial Layer Cells** and watch the areas shaded on the ground re-split. Nothing is handed off: groups just report to the new owners.
-4. Press **B** for the bus view: every process around NATS, and every message between them.
+4. Press <kbd>B</kbd> for the bus view: every process around NATS, and every message between them.
 5. Set **Fake lag** on your own group to 300 ms. Your unit still answers your keys at once (that's prediction), and the rest of the world keeps its pace.
-6. Press **M** for CPU, memory and traffic per process.
+6. Press <kbd>M</kbd> for CPU, memory and traffic per process.
 
 The [debug panel guide](/Worldmesh/guides/debug-panel/) lists every control.

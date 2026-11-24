@@ -251,11 +251,16 @@ const steps = [
     line-height: 1.6;
     color: var(--sl-color-gray-2);
   }
-  .wm-ticksteps.js .wm-steps li:not(.current) {
-    display: none;
-  }
+  /* Every step sits in the same place, so the figure is as tall as its longest step. */
   .wm-ticksteps.js .wm-steps {
-    min-height: 7.5rem;
+    display: grid;
+  }
+  .wm-ticksteps.js .wm-steps li {
+    grid-area: 1 / 1;
+    margin: 0;
+  }
+  .wm-ticksteps.js .wm-steps li:not(.current) {
+    visibility: hidden;
   }
   .wm-step-count {
     color: var(--sl-color-gray-3);

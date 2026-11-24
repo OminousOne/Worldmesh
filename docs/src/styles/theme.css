@@ -227,15 +227,94 @@ h1[data-page-title] {
   border-radius: 5px;
   padding: 0.1rem 0.32rem;
   font-size: 0.86em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
-.sl-markdown-content table {
-  font-size: 0.92rem;
-}
-.sl-markdown-content th {
+/* Keys, as in "press B". */
+.sl-markdown-content kbd {
+  display: inline-block;
+  min-width: 1.7em;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-bottom-width: 3px;
+  border-radius: 6px;
   background: var(--sl-color-gray-7);
   color: var(--sl-color-white);
+  font: 600 0.82em/1.5 var(--__sl-font-mono);
+  text-align: center;
+  white-space: nowrap;
+}
+@media (min-width: 50rem) {
+  .sl-markdown-content td:first-child:has(> kbd):not(:where(.not-content *)) {
+    width: 1%;
+    white-space: nowrap;
+  }
+}
+
+/*
+ * Tables fill the column, so their edges line up with the text around them. Names in the
+ * first column stay on one line on wide screens, and code in tables drops its chip so rows
+ * read cleanly.
+ */
+.sl-markdown-content table:not(:where(.not-content *)) {
+  display: table;
+  width: 100%;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+@media (min-width: 50rem) {
+  /* A single name in the first column never wraps. A list of names may. */
+  .sl-markdown-content td:first-child:has(> code:only-child):not(:where(.not-content *)) {
+    width: 1%;
+    white-space: nowrap;
+  }
+  .sl-markdown-content td:first-child:not(:where(.not-content *)) {
+    min-width: 12rem;
+  }
+  /* Tables in a row of related tables share their column widths. */
+  .wm-aligned table:not(:where(.not-content *)) {
+    table-layout: fixed;
+  }
+  .wm-aligned :is(th, td):first-child {
+    width: 12rem;
+  }
+}
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6rem 1.25rem 0.6rem 0;
+  vertical-align: baseline;
+  border-bottom-color: var(--sl-color-hairline-light);
+}
+.sl-markdown-content :is(th, td):last-child:not(:where(.not-content *)) {
+  padding-inline-end: 0;
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
+  color: var(--sl-color-white);
   font-weight: 700;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.sl-markdown-content :is(td, th) code:not(:where(.not-content *)) {
+  padding: 0;
+  background: none;
+  /* A name breaks in the middle only on a phone, where there's no room. */
+  white-space: nowrap;
+  font-size: 0.88em;
+  color: var(--sl-color-white);
+}
+.sl-markdown-content td:first-child > code:first-child:not(:where(.not-content *)) {
+  font-weight: 600;
+}
+@media (max-width: 49.99rem) {
+  .sl-markdown-content :is(td, th) code:not(:where(.not-content *)) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+/* An environment variable under its option. */
+.sl-markdown-content td:first-child > br + code:not(:where(.not-content *)) {
+  color: var(--sl-color-gray-3);
+  font-weight: 400;
 }
 
 .sl-markdown-content img {
@@ -433,10 +512,14 @@ h1[data-page-title] {
   opacity: 0.45;
   cursor: default;
 }
+/* The one thing to press next, in a color nothing else uses. */
 .wm-btn.primary {
-  background: var(--sl-color-accent);
-  border-color: var(--sl-color-accent);
-  color: var(--sl-color-black);
+  background: var(--wm-role-player);
+  border-color: var(--wm-role-player);
+  color: #1d1600;
+}
+.wm-btn.primary:hover {
+  border-color: var(--wm-fig-text);
 }
 .wm-segmented {
   display: inline-flex;
@@ -498,6 +581,15 @@ h1[data-page-title] {
   box-shadow: 0 0 0 1px var(--wm-fig-line);
 }
 
-.sl-markdown-content thead th {
+.sl-markdown-content thead th:not(:where(.not-content *)) {
   border-bottom: 2px solid var(--wm-section, var(--sl-color-hairline-light));
+}
+
+/* Code in a heading is part of the heading, not a chip. */
+.sl-markdown-content :is(h1, h2, h3, h4) code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.9em;
+  font-weight: 600;
 }

@@ -33,15 +33,17 @@ worldmesh::run(world).await
 
 A plugin registers any of these:
 
-| Piece | What it is | Registered with |
-| --- | --- | --- |
-| Component | A piece of an entity's state | `component::<T>()` (only its server sees it) or `visible::<T>()` (others can see it too) |
-| Kind | A named set of components to start an entity with | `kind("hero", Bundle::new().with(Health(100)))` |
-| Input | What a player is holding, timed to a sub-step. One type per world. | `input::<Walk>()` |
-| Command | A player's request, for their own entity | `command(handler)` |
-| Action | What one entity does to another, to an area, or to everyone | `action(handler)` |
-| Event | Something players see happen | `event::<E>()` |
-| System | Code that runs for every entity, every tick | `system(stage, f)` or `system_for::<T>(stage, f)` |
+| Call | Registers |
+| --- | --- |
+| `component::<T>()` | A **component**: a piece of an entity's state, seen only by its server |
+| `visible::<T>()` | A component others can see too |
+| `kind(name, bundle)` | A **kind**: a named set of components to start an entity with |
+| `input::<I>()` | The **input**: what a player is holding, timed to a sub-step. One type per world. |
+| `command(handler)` | A **command**: a player's request, for their own entity |
+| `action(handler)` | An **action**: what one entity does to another, to an area, or to everyone |
+| `event::<E>()` | An **event**: something players see happen |
+| `system(stage, f)` | A **system**: code that runs for every entity, every tick |
+| `system_for::<T>(stage, f)` | A system for every entity that has a `T` |
 
 The world also says where players appear (`join`) and what every player gets when they connect (`welcome`).
 
@@ -59,7 +61,10 @@ impl Plugin for Combat {
             .action(take_hit)
             .event::<Effect>()
             .system_for::<Dead>(Stage::Last, respawn)
-            .kind("hero", Bundle::new().with(Health(100)).with(Cooldowns::default()));
+            .kind(
+                "hero",
+                Bundle::new().with(Health(100)).with(Cooldowns::default()),
+            );
     }
 }
 ```

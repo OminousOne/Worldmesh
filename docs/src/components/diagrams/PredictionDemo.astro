@@ -41,10 +41,12 @@
       <input type="range" min="0" max="250" step="10" value="100" data-delay />
       <output data-out="delay">100 ms</output>
     </label>
-    <label class="wm-toggle"><input type="checkbox" checked data-predict /> Predict yourself</label>
-    <label class="wm-toggle"><input type="checkbox" checked data-smooth /> Interpolate others</label>
-    <label class="wm-toggle"><input type="checkbox" data-jitter /> Jitter</label>
-    <button class="wm-btn" type="button" data-pause>Pause</button>
+    <span class="toggles">
+      <label class="wm-toggle"><input type="checkbox" checked data-predict /> Predict yourself</label>
+      <label class="wm-toggle"><input type="checkbox" checked data-smooth /> Interpolate others</label>
+      <label class="wm-toggle"><input type="checkbox" data-jitter /> Jitter</label>
+    </span>
+    <button class="wm-btn pause" type="button" data-pause>Pause</button>
   </div>
   <p class="wm-figure-readout" data-readout></p>
 </figure>
@@ -98,6 +100,14 @@
     fill: var(--wm-role-player);
     stroke: #00435a;
     stroke-width: 3;
+  }
+  .toggles {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.1rem;
+  }
+  .pause {
+    margin-inline-start: auto;
   }
   .hint {
     position: absolute;

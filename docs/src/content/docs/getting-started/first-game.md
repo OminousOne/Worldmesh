@@ -79,7 +79,7 @@ struct Tagged {
 }
 ```
 
-Names come from the type: `Tag` is `"tag"`, `YouAreIt` is `"you_are_it"`. Pick another with `#[worldmesh(name = "...")]`.
+Names come from the type: `Tag` is `"tag"` and `YouAreIt` is `"you_are_it"`. To pick another, add `#[worldmesh(name = "...")]` to the type.
 
 ## 4. The plugin
 

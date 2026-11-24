@@ -67,6 +67,12 @@ const bits = [
     background: var(--wm-fig-node);
     border-inline-start: 5px solid var(--tone);
   }
+  @media (max-width: 36rem) {
+    .sections li {
+      grid-template-columns: 1fr;
+      gap: 0.35rem;
+    }
+  }
   .tone-muted {
     --tone: var(--wm-fig-muted);
   }
