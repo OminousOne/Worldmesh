@@ -26,6 +26,7 @@ fn west_east() -> Assignment {
         group_hosts: 1,
         binary_bus: false,
         group_lag: Vec::new(),
+        fake_loss: 0,
     }
 }
 
@@ -83,6 +84,8 @@ fn envelope(to: Address, from: u32, seq: u64, kind: Kind) -> Envelope {
         trace: 7,
         hops: 0,
         kind,
+        ack: None,
+        resends: 0,
     }
 }
 
@@ -772,6 +775,225 @@ fn plugins_can_each_add_components_to_a_kind() {
     assert_eq!(e.get::<Health>(), Some(&Health(55)), "replaced");
     assert!(e.has::<Found>() && e.has::<Walker>(), "added, and kept");
     assert_eq!(rules.schema().kinds, vec!["unit"]);
+}
+
+// ---- Sure delivery ----
+
+use worldmesh_core::reliable::{give_up_ticks, remember_ticks, resend_after_ticks};
+
+/// Step `w` through ticks `from..=to`, keeping only what it published on the last one.
+fn step_through(w: &mut GroupWorld, from: u64, to: u64) -> Vec<(String, Envelope)> {
+    let mut last = Vec::new();
+    for t in from..=to {
+        w.step(t);
+        last = w.take_outbox();
+        if t < to {
+            assert!(last.is_empty(), "published on tick {t}: {last:?}");
+        }
+    }
+    last
+}
+
+#[test]
+fn a_lost_sure_action_is_sent_again_and_lands_exactly_once() {
+    let (mut a, mut b) = (world(1), world(2));
+    spawn_at(&mut a, 1, 10.0, 10.0, true);
+    spawn_at(&mut b, 99, 12.0, 10.0, false);
+    a.receive(command(1, 1, Command::Hit { target: 99 }, 1000));
+    a.step(1001);
+    let first = a.take_outbox();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].1.ack, Some(AckTo::Group(1)));
+    // ... and the bus drops it.
+
+    let copy = step_through(&mut a, 1002, 1001 + resend_after_ticks());
+    assert_eq!(copy.len(), 1, "sent again, once");
+    assert_eq!((copy[0].0.as_str(), copy[0].1.resends), ("entity.99", 1));
+    b.receive(copy[0].1.clone());
+    b.step(1010);
+    assert_eq!(log(&b, 99), vec!["dmg 10 from 1 on 1010"]);
+    assert_eq!(
+        b.take_acks(),
+        vec![(
+            group_acks_subject(1),
+            Acks {
+                by: 2,
+                envelopes: vec![first[0].1.key()],
+                handoffs: vec![],
+            }
+        )]
+    );
+
+    // The confirmation is lost too, so a third copy comes: confirmed again, not applied.
+    let again = step_through(
+        &mut a,
+        1002 + resend_after_ticks(),
+        1001 + resend_after_ticks() * 3,
+    );
+    assert_eq!(again.len(), 1);
+    b.receive(again[0].1.clone());
+    b.step(1011);
+    assert_eq!(log(&b, 99).len(), 1, "applied once");
+    let acks = b.take_acks();
+    assert_eq!(acks.len(), 1);
+    a.receive_acks(acks[0].1.clone());
+    assert_eq!(a.unconfirmed(), 0);
+    assert!(step_through(&mut a, 1002 + resend_after_ticks() * 3, 1100).is_empty());
+}
+
+#[test]
+fn a_copy_is_recognised_however_many_other_actions_landed_in_between() {
+    let mut b = world(2);
+    spawn_at(&mut b, 99, 12.0, 10.0, false);
+    let sure = |seq: u64, tick: u64| {
+        let mut env = envelope(Address::Entity { id: 99 }, 1, seq, damage(1));
+        env.from.tick = tick;
+        env.ack = Some(AckTo::Group(1));
+        env
+    };
+    b.receive(sure(1, 1000));
+    b.step(1001);
+    for seq in 2..200 {
+        b.receive(sure(seq, 1001));
+    }
+    b.step(1002);
+    assert_eq!(log(&b, 99).len(), 199);
+    b.receive(sure(1, 1000)); // sent again: its confirmation was lost
+    b.step(1003);
+    assert_eq!(log(&b, 99).len(), 199, "not applied twice");
+}
+
+#[test]
+fn a_sure_copy_sent_too_long_ago_to_check_is_confirmed_but_not_applied() {
+    let mut b = world(2);
+    spawn_at(&mut b, 99, 12.0, 10.0, false);
+    let mut env = envelope(Address::Entity { id: 99 }, 1, 1, damage(1));
+    env.from.tick = 1000;
+    env.ack = Some(AckTo::Group(1));
+    b.receive(env);
+    b.step(1001 + remember_ticks());
+    assert!(log(&b, 99).is_empty());
+    assert_eq!(b.take_acks()[0].1.envelopes, vec![(1, 1)]);
+}
+
+#[test]
+fn a_throwaway_action_is_sent_once_and_never_again() {
+    let mut a = world(1);
+    spawn_at(&mut a, 1, 10.0, 10.0, true);
+    a.receive(command(1, 1, Command::Poke { target: 99 }, 1000));
+    a.step(1001);
+    let out = a.take_outbox();
+    assert_eq!((out.len(), out[0].1.ack), (1, None));
+    assert_eq!(a.unconfirmed(), 0);
+    assert!(step_through(&mut a, 1002, 1100).is_empty());
+}
+
+#[test]
+fn an_unconfirmed_sure_action_is_given_up_on_and_counted_as_lost() {
+    let mut a = world(1);
+    spawn_at(&mut a, 1, 10.0, 10.0, true);
+    a.receive(command(1, 1, Command::Hit { target: 404 }, 1000));
+    a.step(1001);
+    assert_eq!(a.take_outbox().len(), 1, "the first send");
+    let mut copies = 0;
+    for t in 1002..=1001 + give_up_ticks() + 1 {
+        a.step(t);
+        copies += a.take_outbox().len();
+    }
+    assert!(copies >= 4, "kept trying for a while: {copies} copies");
+    assert_eq!(a.unconfirmed(), 0);
+    let stats = a.take_stats(1.0);
+    assert_eq!((stats.resent, stats.lost), (copies as f32, 1.0));
+}
+
+#[test]
+fn a_sure_action_for_everyone_waits_for_every_group_in_use() {
+    let (mut a, mut b) = (world(1), world(2));
+    spawn_at(&mut a, 1, 10.0, 10.0, true);
+    spawn_at(&mut b, 99, 12.0, 10.0, false);
+    a.receive(command(1, 1, Command::Shout, 1000));
+    a.step(1001);
+    deliver(&mut a, &mut [&mut b]);
+    b.step(1002);
+    assert_eq!(log(&b, 99), vec!["dmg 1 from 1 on 1002 all"]);
+    a.step(1002); // our own copy comes back on the broadcast: nothing to confirm by bus
+    let copies = step_through(&mut a, 1003, 1001 + resend_after_ticks());
+    assert_eq!(
+        copies.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(),
+        vec![group_inbox_subject(1), group_inbox_subject(2)],
+        "neither confirmed: the broadcast never came back to group 1 in this test"
+    );
+    for (_, env) in copies {
+        a.receive(env.clone());
+        b.receive(env);
+    }
+    a.step(1002 + resend_after_ticks());
+    b.step(1002 + resend_after_ticks());
+    assert_eq!(log(&b, 99).len(), 1, "a copy, not applied again");
+    for (_, acks) in b.take_acks() {
+        a.receive_acks(acks);
+    }
+    assert!(
+        a.take_acks().is_empty(),
+        "group 1 confirms its own entity's action directly"
+    );
+    assert_eq!(a.unconfirmed(), 0);
+}
+
+#[test]
+fn a_players_command_is_confirmed_to_their_gateway() {
+    let mut w = world(1);
+    spawn_at(&mut w, 1, 10.0, 10.0, true);
+    let mut cmd = command(1, 41, Command::Spawn, 1000);
+    cmd.ack = Some(AckTo::Gateway(77));
+    w.receive(cmd.clone());
+    w.step(1001);
+    w.receive(cmd); // sent again by the gateway
+    w.step(1002);
+    assert_eq!(w.take_spawns().len(), 1, "handled once");
+    let acks = w.take_acks();
+    assert_eq!(
+        (acks[0].0.as_str(), acks[0].1.envelopes.as_slice()),
+        ("gateway.77.acks", &[(1, 41), (1, 41)][..]),
+        "confirmed both times"
+    );
+}
+
+#[test]
+fn a_lost_handoff_is_sent_again_and_the_entity_arrives_once() {
+    let (mut a, mut b, mut c) = (world(1), world(2), world(3));
+    spawn_at(&mut a, 1, 10.0, 10.0, true);
+    a.step(1000);
+    release(&mut a, 1, 2);
+    let lost = a.take_releases(1000);
+    assert_eq!(lost[0].1.ack, Some(AckTo::Group(1)));
+    // ... and the bus drops it. The old group keeps forwarding while it waits.
+    let copy = step_through(&mut a, 1001, 1000 + resend_after_ticks());
+    assert_eq!(copy[0].0, group_inbox_subject(2));
+    b.receive(copy[0].1.clone());
+    assert!(b.entity(1).is_some());
+    b.step(1000 + resend_after_ticks());
+    let acks = b.take_acks();
+    assert_eq!(acks[0].1.handoffs, vec![(1, 1000)]);
+    assert!(
+        a.listening_entities().contains(&1),
+        "still forwarding: not confirmed yet"
+    );
+
+    // The entity moves on to group 3; then a stale copy of the first handoff reaches group 2.
+    hand_off(&mut b, &mut c, 1, 1000 + resend_after_ticks());
+    b.receive(lost[0].1.clone());
+    assert!(b.entity(1).is_none(), "not taken twice");
+    assert!(c.entity(1).is_some());
+
+    a.receive_acks(acks[0].1.clone());
+    assert_eq!(a.unconfirmed(), 0);
+    let later = 1001 + resend_after_ticks() + time::ticks_in(FORWARD_FOR_MS);
+    a.step(later);
+    assert!(
+        !a.listening_entities().contains(&1),
+        "stops forwarding after a while"
+    );
 }
 
 // ---- Fake lag ----

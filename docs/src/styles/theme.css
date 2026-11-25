@@ -310,6 +310,10 @@ h1[data-page-title] {
     white-space: normal;
     overflow-wrap: anywhere;
   }
+  /* A single short name keeps its letters together: its column is at least that wide. */
+  .sl-markdown-content td:first-child > code:only-child:not(:where(.not-content *)) {
+    overflow-wrap: break-word;
+  }
 }
 /* An environment variable under its option. */
 .sl-markdown-content td:first-child > br + code:not(:where(.not-content *)) {

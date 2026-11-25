@@ -3,14 +3,17 @@
 //! A group owns entities, not land: an entity walking anywhere stays in its group. Entities
 //! only change groups when the orchestrator says so (scaling up or down, or regrouping), with
 //! a live handoff: the entity's record (its data, pending inputs and recent history) travels
-//! to the new group, and the old one forwards anything that still arrives for it.
+//! to the new group, and the old one forwards anything that still arrives for it. The old group
+//! keeps the record until the new one confirms it arrived, and sends it again until then.
 //!
 //! Each tick a group:
 //! 1. delivers last tick's commands and actions (to an entity, an area or everyone) in a fixed
 //!    order, to every handler registered for them,
 //! 2. runs the systems, stage by stage, for every entity (with its player's inputs due this tick),
 //! 3. reports its entities (and their questions, and events) to the Spatial Layer Cells whose
-//!    areas they stand in, hands off what it was told to, and publishes its envelopes.
+//!    areas they stand in, hands off what it was told to, and publishes its envelopes: new
+//!    ones, copies of sure ones nobody confirmed yet, and its confirmations of what it got
+//!    (see [`worldmesh_core::reliable`]).
 //!
 //! One process (a "group host") runs any number of groups.
 
@@ -21,21 +24,23 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use crate::entity::{Entity, Meta, Record};
 use crate::me::{Incoming, Me, Requests};
 use crate::world::Rules;
 use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
-    Address, Assignment, BusKind, BusMsg, DebugReport, EntityId, Envelope, EventAt, Facts,
-    GroupCommand, GroupCommandKind, GroupId, GroupReport, Heartbeat, HostCommand, Kind, NewEntity,
-    ProcessStats, Reported, Seen, SenseAnswers, SenseQuery, SpawnRequest, StreamKind, StreamMsg,
+    AckTo, Acks, Address, Assignment, BusKind, BusMsg, DebugReport, EntityId, Envelope, EventAt,
+    Facts, GroupCommand, GroupCommandKind, GroupId, GroupReport, Heartbeat, HostCommand, Kind,
+    NewEntity, ProcessStats, Reported, Seen, SenseAnswers, SenseQuery, SpawnRequest, StreamKind,
+    StreamMsg,
 };
+use worldmesh_core::reliable::{too_old, Handled, Target, Unconfirmed};
 use worldmesh_core::subjects::{
-    entity_subject, group_inbox_subject, group_senses_subject, random_process_id,
-    spatial_inbox_subject, spatial_reports_subject, ASSIGNMENTS, BROADCAST, DEBUG_REPORTS,
-    GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, SPAWNS, STATS,
+    entity_subject, group_acks_subject, group_inbox_subject, group_senses_subject,
+    random_process_id, spatial_inbox_subject, spatial_reports_subject, ASSIGNMENTS, BROADCAST,
+    DEBUG_REPORTS, GROUP_COMMANDS, HEARTBEATS, HOST_COMMANDS, SPAWNS, STATS,
 };
 use worldmesh_core::{bus, stats, time};
 
@@ -45,8 +50,6 @@ const FORWARD_FOR_MS: u64 = 1000;
 const SENSE_TTL_MS: u64 = 1000;
 /// Ticks of position history kept per entity (for [`Me::position_at`]).
 const TRAIL_TICKS: usize = 20;
-/// Envelopes per entity remembered, so one delivered twice (directly and forwarded) applies once.
-const RECENT_DELIVERIES: usize = 32;
 /// An envelope gives up after being forwarded this many times.
 const MAX_HOPS: u8 = 3;
 
@@ -64,6 +67,9 @@ pub struct Counters {
     pub actions_sent: u64,
     pub actions_forwarded: u64,
     pub handoffs: u64,
+    /// Sure envelopes (actions, handoffs) sent again, and given up on.
+    pub resent: u64,
+    pub lost: u64,
     pub queries: u64,
     /// Time spent ticking: total and worst (microseconds), and how many ticks.
     pub tick_us_sum: u64,
@@ -83,6 +89,10 @@ pub struct GroupWorld {
     owners: Option<Vec<GroupId>>,
     /// Spatial Layer Cells in use: every one gets a report every tick.
     spatial: Vec<GroupId>,
+    /// Groups in use: each confirms an action sent to everyone.
+    groups: Vec<GroupId>,
+    /// The tick being simulated.
+    now: u64,
     /// Entities simulated here. A BTreeMap so iteration order is deterministic.
     entities: BTreeMap<EntityId, Record>,
     schedule: BTreeMap<EntityId, Schedule>,
@@ -103,6 +113,14 @@ pub struct GroupWorld {
     local_next: Vec<Envelope>,
     /// (subject, envelope) to publish after the tick.
     outbox: Vec<(String, Envelope)>,
+    /// Sure actions our entities sent, until whoever got them confirms.
+    sent: Unconfirmed,
+    /// Handoffs, until the new group confirms the entity arrived.
+    handing_off: Unconfirmed,
+    /// Handoffs received lately: (entity, old group, its number), so a copy isn't taken twice.
+    handoffs_seen: Handled<(EntityId, GroupId, u64)>,
+    /// Confirmations to send after the tick, to each process that sent us something sure.
+    acks: BTreeMap<AckTo, Acks>,
     /// The game's events this tick, and where.
     events: Vec<EventAt>,
     /// Entities the game spawned this tick, for the orchestrator to place.
@@ -120,6 +138,8 @@ impl GroupWorld {
             config,
             owners: None,
             spatial: Vec::new(),
+            groups: Vec::new(),
+            now: 0,
             entities: BTreeMap::new(),
             schedule: BTreeMap::new(),
             left: BTreeSet::new(),
@@ -130,6 +150,10 @@ impl GroupWorld {
             inbox: Vec::new(),
             local_next: Vec::new(),
             outbox: Vec::new(),
+            sent: Unconfirmed::default(),
+            handing_off: Unconfirmed::default(),
+            handoffs_seen: Handled::default(),
+            acks: BTreeMap::new(),
             events: Vec::new(),
             spawns: Vec::new(),
             bus_log: Vec::new(),
@@ -140,6 +164,11 @@ impl GroupWorld {
     pub fn set_assignment(&mut self, assignment: &Assignment) {
         self.owners = Some(assignment.owners.clone());
         self.spatial = assignment.spatial.clone();
+        self.groups = assignment.groups.clone();
+        // Groups and cells taken out of use won't confirm anything any more.
+        let (groups, spatial) = (&self.groups, &self.spatial);
+        self.sent
+            .retain_confirmers(|id| groups.contains(&id) || spatial.contains(&id));
     }
 
     /// The Spatial Layer Cell whose area (x, y) is in.
@@ -244,6 +273,7 @@ impl GroupWorld {
     /// An envelope from the bus (an entity subject, this group's inbox, or the broadcast).
     pub fn receive(&mut self, env: Envelope) {
         let kind = match (&env.kind, env.to) {
+            _ if env.resends > 0 => BusKind::Resend,
             _ if env.hops > 0 => BusKind::Forward,
             (Kind::Handoff { .. }, _) => BusKind::Handoff,
             (Kind::Input { .. }, _) => BusKind::Input,
@@ -275,8 +305,16 @@ impl GroupWorld {
                 }
             }
             Kind::Handoff { ref entity } => {
-                let bytes = entity.clone();
-                self.receive_handoff(&bytes);
+                let key = (env.from.id, env.from.group, env.seq);
+                if self.handoffs_seen.first(key, self.now.max(env.from.tick)) {
+                    let bytes = entity.clone();
+                    self.receive_handoff(&bytes);
+                }
+                // A copy (ours got lost, or the confirmation did) is confirmed again.
+                if let Some(to) = env.ack {
+                    let acks = self.acks.entry(to).or_default();
+                    acks.handoffs.push(env.key());
+                }
             }
             Kind::Command { .. } | Kind::Action { .. } => self.inbox.push(env),
         }
@@ -308,6 +346,16 @@ impl GroupWorld {
         }
         self.moved.remove(&id);
         self.entities.insert(id, record);
+    }
+
+    /// Confirmations from a process we sent sure envelopes to.
+    pub fn receive_acks(&mut self, acks: Acks) {
+        for key in acks.envelopes {
+            self.sent.confirm(acks.by, key);
+        }
+        for key in acks.handoffs {
+            self.handing_off.confirm(acks.by, key);
+        }
     }
 
     /// Answers from a Spatial Layer Cell. A circle crossing two cells' areas gets two answers
@@ -353,11 +401,43 @@ impl GroupWorld {
 
     /// Advance to world tick `tick`.
     pub fn step(&mut self, tick: u64) {
+        self.now = tick;
         self.deliver_envelopes(tick);
         self.tick_entities(tick);
-        self.moved.retain(|_, &mut (_, until)| until >= tick);
+        self.resend(tick);
+        // Keep forwarding for a handed-off entity until its new group confirms it, and a
+        // while after.
+        let (handing_off, forward_for) = (&self.handing_off, time::ticks_in(FORWARD_FOR_MS));
+        self.moved.retain(|&id, (_, until)| {
+            if handing_off.any_from(id) {
+                *until = (*until).max(tick + forward_for);
+            }
+            *until >= tick
+        });
         let ttl = time::ticks_in(SENSE_TTL_MS);
         self.senses.retain(|_, (t, _)| *t + ttl >= tick);
+    }
+
+    /// Send again what wasn't confirmed in time; give up on what's been waiting too long.
+    fn resend(&mut self, tick: u64) {
+        let due = self.sent.due(tick);
+        self.outbox.extend(due.resend);
+        for env in due.lost {
+            debug!(
+                from = env.from.id,
+                seq = env.seq,
+                "a sure action was never confirmed"
+            );
+        }
+        let due = self.handing_off.due(tick);
+        self.outbox.extend(due.resend);
+        for env in due.lost {
+            warn!(
+                id = env.from.id,
+                to = ?env.to,
+                "a handoff was never confirmed: the entity may be lost"
+            );
+        }
     }
 
     /// Run `f` on entity `id` with a [`Me`] for it, then carry out what game code asked for.
@@ -465,8 +545,14 @@ impl GroupWorld {
     /// Deliver an envelope to whoever owns its address. Anything for this group waits for the
     /// next step, exactly like envelopes from other groups.
     fn route(&mut self, env: Envelope) {
+        // A sure envelope is kept until whoever must confirm it does.
+        let sure = env.ack.is_some();
+        let now = self.now;
         match env.to {
             Address::Entity { id } => {
+                if sure {
+                    self.sent.track(&env, vec![Target::entity(id)], now);
+                }
                 if self.entities.contains_key(&id) {
                     self.local_next.push(env);
                 } else {
@@ -477,17 +563,37 @@ impl GroupWorld {
             // Even our own entities in the circle hear about it through the spatial layer:
             // only it knows who stands there.
             Address::Area { x, y, r } => {
-                for spatial in self.spatial_in_circle(x, y, r) {
+                let cells = self.spatial_in_circle(x, y, r);
+                if sure {
+                    let targets = cells.iter().map(|&c| Target::inbox(c)).collect();
+                    self.sent.track(&env, targets, now);
+                }
+                for spatial in cells {
                     self.counters.actions_sent += 1;
                     self.outbox
                         .push((spatial_inbox_subject(spatial), env.clone()));
                 }
             }
             Address::Everyone => {
+                if sure {
+                    let targets = self.groups.iter().map(|&g| Target::inbox(g)).collect();
+                    self.sent.track(&env, targets, now);
+                }
                 self.counters.actions_sent += 1;
                 self.outbox.push((BROADCAST.to_string(), env));
             }
             Address::Group { id } => self.outbox.push((group_inbox_subject(id), env)),
+        }
+    }
+
+    /// Note that a sure envelope reached its entity (or area, or everyone here), to confirm
+    /// after the tick. Copies are confirmed too: the earlier confirmation may have been lost.
+    fn confirm(&mut self, env: &Envelope) {
+        match env.ack {
+            None => {}
+            // Sent by one of our own entities: nothing to send.
+            Some(AckTo::Group(g)) if g == self.group_id => self.sent.confirm(g, env.key()),
+            Some(to) => self.acks.entry(to).or_default().envelopes.push(env.key()),
         }
     }
 
@@ -523,14 +629,21 @@ impl GroupWorld {
                 forwarded: env.hops > 0,
                 trace: env.trace,
             };
+            // A sure envelope sent so long ago that we can't tell whether a copy already
+            // landed: confirmed (where it's for us) but not applied.
+            let stale = env.ack.is_some() && too_old(env.from.tick, tick);
             match (&env.to, &env.kind) {
                 (&Address::Entity { id }, Kind::Command { msg, body }) => {
-                    // Only an entity's own player may command it.
                     if !self.entities.contains_key(&id) {
                         self.forward(id, env.clone());
                         continue;
                     }
-                    if env.from.id != id || !self.first_delivery(id, &env.from, env.seq) {
+                    self.confirm(&env);
+                    // Only an entity's own player may command it.
+                    if stale
+                        || env.from.id != id
+                        || !self.first_delivery(id, &env.from, env.seq, tick)
+                    {
                         continue;
                     }
                     let rules = self.rules.clone();
@@ -554,14 +667,19 @@ impl GroupWorld {
                         self.forward(id, env.clone());
                         continue;
                     }
-                    if !self.first_delivery(id, &env.from, env.seq) {
-                        continue; // a duplicate (old owner forwarded what we also got directly)
+                    self.confirm(&env);
+                    if stale || !self.first_delivery(id, &env.from, env.seq, tick) {
+                        continue; // a copy: sent again, or forwarded as well as sent directly
                     }
                     self.count_delivery(&env.from);
                     let from = incoming(None, false);
                     self.act(id, tick, *msg, body, &from);
                 }
                 (&Address::Area { x, y, r }, Kind::Action { msg, body }) => {
+                    self.confirm(&env);
+                    if stale {
+                        continue;
+                    }
                     let inside: Vec<EntityId> = self
                         .entities
                         .values()
@@ -574,18 +692,22 @@ impl GroupWorld {
                     let from = incoming(Some((x, y, r)), false);
                     for id in inside {
                         // Two Spatial Layer Cells may both pass on the same area action.
-                        if self.first_delivery(id, &env.from, env.seq) {
+                        if self.first_delivery(id, &env.from, env.seq, tick) {
                             self.count_delivery(&env.from);
                             self.act(id, tick, *msg, body, &from);
                         }
                     }
                 }
                 (Address::Everyone, Kind::Action { msg, body }) => {
+                    self.confirm(&env);
+                    if stale {
+                        continue;
+                    }
                     let ids: Vec<EntityId> = self.entities.keys().copied().collect();
                     let from = incoming(None, true);
                     for id in ids {
                         if self.entities.contains_key(&id)
-                            && self.first_delivery(id, &env.from, env.seq)
+                            && self.first_delivery(id, &env.from, env.seq, tick)
                         {
                             self.count_delivery(&env.from);
                             self.act(id, tick, *msg, body, &from);
@@ -625,20 +747,14 @@ impl GroupWorld {
     }
 
     /// Record who sent it on the entity; false if it was already delivered.
-    fn first_delivery(&mut self, id: EntityId, from: &Facts, seq: u64) -> bool {
+    fn first_delivery(&mut self, id: EntityId, from: &Facts, seq: u64, tick: u64) -> bool {
         let Some(record) = self.entities.get_mut(&id) else {
             return false;
         };
-        let key = (from.id, seq, from.group == 0);
-        let recent = &mut record.meta.recent;
-        if recent.contains(&key) {
-            return false;
-        }
-        recent.push(key);
-        if recent.len() > RECENT_DELIVERIES {
-            recent.remove(0);
-        }
-        true
+        record
+            .meta
+            .recent
+            .first((from.id, seq, from.group == 0), tick)
     }
 
     // ---- What goes out after a tick ----
@@ -646,6 +762,21 @@ impl GroupWorld {
     /// Envelopes to publish: (subject, envelope).
     pub fn take_outbox(&mut self) -> Vec<(String, Envelope)> {
         std::mem::take(&mut self.outbox)
+    }
+
+    /// Confirmations to publish: (subject, confirmations), one per process that sent us
+    /// something sure this tick.
+    pub fn take_acks(&mut self) -> Vec<(String, Acks)> {
+        let by = self.group_id;
+        std::mem::take(&mut self.acks)
+            .into_iter()
+            .map(|(to, acks)| (to.subject(), Acks { by, ..acks }))
+            .collect()
+    }
+
+    /// Sure actions and handoffs still waiting for a confirmation.
+    pub fn unconfirmed(&self) -> usize {
+        self.sent.len() + self.handing_off.len()
     }
 
     /// Entities the game spawned, for the orchestrator to place.
@@ -709,7 +840,8 @@ impl GroupWorld {
     }
 
     /// Remove and return the handoff envelope for every entity the orchestrator asked us to
-    /// release. Its pending inputs go with it; we keep listening a while to forward strays.
+    /// release. Its pending inputs go with it; we keep listening a while to forward strays, and
+    /// keep the envelope to send again until the new group confirms it.
     pub fn take_releases(&mut self, tick: u64) -> Vec<(GroupId, Envelope)> {
         let mut out = Vec::new();
         for (id, to) in std::mem::take(&mut self.releases) {
@@ -743,11 +875,15 @@ impl GroupWorld {
                 to: Address::Group { id: to },
                 from,
                 via: self.group_id,
-                seq: 0,
+                // Unique per entity and sender: an entity leaves a group at most once a tick.
+                seq: tick,
                 trace: 0,
                 hops: 0,
                 kind: Kind::Handoff { entity: bytes },
+                ack: Some(AckTo::Group(self.group_id)),
+                resends: 0,
             };
+            self.handing_off.track(&env, vec![Target::inbox(to)], tick);
             out.push((to, env));
         }
         out
@@ -779,6 +915,10 @@ impl GroupWorld {
 
     /// This group's numbers over the last `secs` seconds (then they start again from zero).
     pub fn take_stats(&mut self, secs: f32) -> ProcessStats {
+        let (resent, lost) = self.sent.take_counts();
+        let (h_resent, h_lost) = self.handing_off.take_counts();
+        self.counters.resent += resent + h_resent;
+        self.counters.lost += lost + h_lost;
         let c = std::mem::take(&mut self.counters);
         let per_sec = |n: u64| n as f32 / secs;
         ProcessStats {
@@ -793,6 +933,8 @@ impl GroupWorld {
             actions_sent: per_sec(c.actions_sent),
             actions_forwarded: per_sec(c.actions_forwarded),
             handoffs: per_sec(c.handoffs),
+            resent: per_sec(c.resent),
+            lost: per_sec(c.lost),
             queries: per_sec(c.queries),
             ..ProcessStats::default()
         }
@@ -808,6 +950,7 @@ fn distance(ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
 /// Something a group received, held back while it has fake lag.
 enum Inbound {
     Envelope(Envelope),
+    Acks(Acks),
     Senses(SenseAnswers),
     Command(GroupCommand),
 }
@@ -847,6 +990,7 @@ struct Runner {
     world: GroupWorld,
     inbox: UnboundedReceiver<(Instant, Envelope)>,
     broadcast: UnboundedReceiver<(Instant, Envelope)>,
+    acks: UnboundedReceiver<(Instant, Acks)>,
     senses: UnboundedReceiver<(Instant, SenseAnswers)>,
     /// One subject per entity it simulates (or just handed off); dropping a receiver unsubscribes.
     entity_subs: BTreeMap<EntityId, UnboundedReceiver<(Instant, Envelope)>>,
@@ -874,6 +1018,7 @@ impl Runner {
         }
         let inbox = bus::subscribe_timed::<Envelope>(nats, &group_inbox_subject(id)).await?;
         let broadcast = bus::subscribe_timed::<Envelope>(nats, BROADCAST).await?;
+        let acks = bus::subscribe_timed::<Acks>(nats, &group_acks_subject(id)).await?;
         let senses = bus::subscribe_timed::<SenseAnswers>(nats, &group_senses_subject(id)).await?;
         bus::publish(nats, HEARTBEATS.to_string(), &world.heartbeat()).await;
         // Sends held-back messages when they're due; ends when the runner is dropped.
@@ -891,6 +1036,7 @@ impl Runner {
             world,
             inbox,
             broadcast,
+            acks,
             senses,
             entity_subs: BTreeMap::new(),
             lag,
@@ -948,6 +1094,9 @@ impl Runner {
                 arrived.push((at, Inbound::Envelope(env)));
             }
         }
+        while let Ok((at, acks)) = self.acks.try_recv() {
+            arrived.push((at, Inbound::Acks(acks)));
+        }
         while let Ok((at, answers)) = self.senses.try_recv() {
             arrived.push((at, Inbound::Senses(answers)));
         }
@@ -962,6 +1111,7 @@ impl Runner {
         for item in ready {
             match item {
                 Inbound::Envelope(env) => self.world.receive(env),
+                Inbound::Acks(acks) => self.world.receive_acks(acks),
                 Inbound::Senses(answers) => self.world.receive_senses(answers),
                 Inbound::Command(cmd) => self.world.command(cmd),
             }
@@ -986,6 +1136,9 @@ impl Runner {
         }
         for (subject, env) in self.world.take_outbox() {
             out.push((subject, bus::encode_now(&env)));
+        }
+        for (subject, acks) in self.world.take_acks() {
+            out.push((subject, bus::encode_now(&acks)));
         }
         let spawns = self.world.take_spawns();
         if !spawns.is_empty() {
@@ -1074,6 +1227,7 @@ pub async fn run(
 
         while let Ok(a) = assignments.try_recv() {
             bus::set_binary(a.binary_bus);
+            bus::set_fake_loss(a.fake_loss);
             for (id, r) in runners.iter_mut() {
                 r.world.set_assignment(&a);
                 let lag = lag_of(&a, *id);

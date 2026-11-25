@@ -42,6 +42,21 @@ pub fn group_inbox_subject(group: GroupId) -> String {
     format!("group.{group}.inbox")
 }
 
+/// Confirmations for one group: the sure actions and handoffs it sent arrived.
+pub fn group_acks_subject(group: GroupId) -> String {
+    format!("group.{group}.acks")
+}
+
+/// Confirmations for one Spatial Layer Cell: the area actions it passed on arrived.
+pub fn spatial_acks_subject(spatial: GroupId) -> String {
+    format!("spatial.{spatial}.acks")
+}
+
+/// Confirmations for one gateway: its players' commands arrived.
+pub fn gateway_acks_subject(gateway: u32) -> String {
+    format!("gateway.{gateway}.acks")
+}
+
 /// Spatial Layer Cells -> one group: results of its entities' spatial queries.
 pub fn group_senses_subject(group: GroupId) -> String {
     format!("group.{group}.senses")

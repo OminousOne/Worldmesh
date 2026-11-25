@@ -1,0 +1,231 @@
+---
+// One action from Group 1 to Group 2, sent either way, with or without the bus dropping the
+// first copy. Ticks run left to right.
+const states = {
+  'send-ok': 'Sent once. It lands on tick n + 1, like every action. Nothing comes back, and nothing is kept.',
+  'send-drop': "The bus dropped it, so it's gone, and the sender never knows. Fine for something the next tick replaces anyway.",
+  'sure-ok': 'It lands on tick n + 1 too. Group 2 confirms it at the end of that tick, and Group 1 stops keeping it.',
+  'sure-drop':
+    'The bus dropped it. No confirmation came back, so 400 ms later Group 1 sends it again. It lands late, once, and the handler can see it was sent on tick n.',
+};
+const ticks = ['n', 'n + 1', 'n + 2', 'n + 3', 'n + 4', 'n + 5', 'n + 6'];
+const col = (i: number) => 161 + i * 83;
+---
+
+<figure class="wm-figure not-content wm-sure" data-mode="send" data-drop="false" data-state="send-ok" data-states={JSON.stringify(states)}>
+  <svg viewBox="0 0 720 262" role="img" aria-label="An action sent with me.send or me.send_reliable, with or without the bus dropping it">
+    <defs>
+      <marker id="wm-sure-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 10 5 0 10z" />
+      </marker>
+      <marker id="wm-sure-ack" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0 0 10 5 0 10z" />
+      </marker>
+    </defs>
+    <g class="ticks">
+      {
+        ticks.map((t, i) => (
+          <g>
+            <rect x={col(i) - 39} y="8" width="78" height="246" rx="8" />
+            <text x={col(i)} y="28">{t}</text>
+          </g>
+        ))
+      }
+    </g>
+    <g class="rows">
+      <text x="14" y="76">Group 1</text>
+      <text class="bus-label" x="14" y="141">NATS</text>
+      <text x="14" y="206">Group 2</text>
+      <line class="bus" x1="122" y1="137" x2="698" y2="137" />
+    </g>
+
+    <!-- The first send, the same in every state. -->
+    <g class="pill sender">
+      <rect x={col(0) - 37} y="56" width="74" height="28" rx="14" />
+      <text x={col(0)} y="75" data-call>send</text>
+    </g>
+
+    <!-- Delivered on n + 1 (both ways, no loss). -->
+    <g class="state send-ok sure-ok">
+      <path class="trip" d={`M${col(0)} 84 C${col(0)} 137 ${col(0) + 20} 137 ${col(0) + 40} 137 L${col(1) - 30} 137 C${col(1)} 137 ${col(1)} 160 ${col(1)} 184`} marker-end="url(#wm-sure-arrow)" />
+      <g class="pill target">
+        <rect x={col(1) - 37} y="186" width="74" height="28" rx="14" />
+        <text x={col(1)} y="205">handler</text>
+      </g>
+    </g>
+
+    <!-- Dropped on the bus (both ways). -->
+    <g class="state send-drop sure-drop">
+      <path class="trip" d={`M${col(0)} 84 C${col(0)} 137 ${col(0) + 20} 137 ${col(0) + 46} 137`} />
+      <g class="drop">
+        <path d={`M${col(0) + 46} 129 l16 16 m0 -16 l-16 16`} />
+      </g>
+      <text class="note" x={col(0) + 70} y="126">dropped</text>
+    </g>
+    <g class="state send-drop">
+      <text class="note faint" x={col(1)} y="205" text-anchor="middle">never arrives</text>
+    </g>
+
+    <!-- Confirmed (sure, no loss). -->
+    <g class="state sure-ok">
+      <path class="ack" d={`M${col(1) + 30} 196 C${col(1) + 50} 196 ${col(1) + 50} 137 ${col(1) + 66} 137 C${col(2)} 137 ${col(2)} 110 ${col(2)} 86`} marker-end="url(#wm-sure-ack)" />
+      <text class="note ack-label" x={col(2) + 8} y="160">confirmed</text>
+      <g class="pill done">
+        <rect x={col(2) - 35} y="56" width="70" height="28" rx="14" />
+        <text x={col(2)} y="75">forgets</text>
+      </g>
+    </g>
+
+    <!-- Sent again, lands late, confirmed (sure, dropped). -->
+    <g class="state sure-drop">
+      <text class="note" x={col(2)} y="75" text-anchor="middle">waiting…</text>
+      <g class="pill again">
+        <rect x={col(4) - 39} y="56" width="78" height="28" rx="14" />
+        <text x={col(4)} y="75">again</text>
+      </g>
+      <path class="trip" d={`M${col(4)} 84 C${col(4)} 137 ${col(4) + 20} 137 ${col(4) + 40} 137 L${col(5) - 30} 137 C${col(5)} 137 ${col(5)} 160 ${col(5)} 184`} marker-end="url(#wm-sure-arrow)" />
+      <g class="pill target">
+        <rect x={col(5) - 37} y="186" width="74" height="28" rx="14" />
+        <text x={col(5)} y="205">handler</text>
+      </g>
+      <path class="ack" d={`M${col(5) + 30} 196 C${col(5) + 50} 196 ${col(5) + 50} 137 ${col(5) + 66} 137 C${col(6)} 137 ${col(6)} 110 ${col(6)} 86`} marker-end="url(#wm-sure-ack)" />
+      <text class="note ack-label" x={col(6)} y="160" text-anchor="middle">confirmed</text>
+      <g class="pill done">
+        <rect x={col(6) - 35} y="56" width="70" height="28" rx="14" />
+        <text x={col(6)} y="75">forgets</text>
+      </g>
+    </g>
+  </svg>
+  <p class="wm-figure-readout" data-readout>{states['send-ok']}</p>
+  <div class="wm-figure-controls">
+    <div class="wm-segmented" role="group" aria-label="How it's sent">
+      <button class="wm-btn" type="button" data-mode="send" aria-pressed="true">me.send</button>
+      <button class="wm-btn" type="button" data-mode="sure" aria-pressed="false">me.send_reliable</button>
+    </div>
+    <button class="wm-btn" type="button" data-drop aria-pressed="false">The bus drops it</button>
+  </div>
+</figure>
+
+<style>
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .ticks rect {
+    fill: var(--wm-fig-node);
+    stroke: var(--wm-fig-grid);
+  }
+  .ticks text {
+    font: 700 13px var(--__sl-font);
+    fill: var(--wm-fig-muted);
+    text-anchor: middle;
+  }
+  .rows text {
+    font: 700 13px var(--__sl-font);
+    fill: var(--wm-role-group);
+  }
+  .rows text.bus-label {
+    fill: var(--wm-role-bus);
+  }
+  .bus {
+    stroke: var(--wm-role-bus);
+    stroke-width: 6;
+    stroke-linecap: round;
+    opacity: 0.4;
+  }
+  .pill rect {
+    fill: var(--wm-fig-bg);
+    stroke: var(--wm-fig-line);
+    stroke-width: 1.5;
+  }
+  .pill text {
+    font: 600 12px var(--__sl-font-mono);
+    fill: var(--wm-fig-text);
+    text-anchor: middle;
+  }
+  .pill.sender rect,
+  .pill.again rect {
+    stroke: var(--wm-role-group);
+    stroke-width: 2;
+  }
+  .pill.target rect {
+    stroke: var(--wm-role-action);
+    stroke-width: 2.5;
+    fill: color-mix(in oklab, var(--wm-role-action) 16%, var(--wm-fig-bg));
+  }
+  .pill.done rect {
+    stroke: var(--wm-role-bus);
+    stroke-dasharray: 4 3;
+  }
+  .trip {
+    fill: none;
+    stroke: var(--wm-role-action);
+    stroke-width: 3;
+  }
+  .ack {
+    fill: none;
+    stroke: var(--wm-role-bus);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+  }
+  .drop path {
+    stroke: var(--wm-role-action);
+    stroke-width: 3.5;
+    stroke-linecap: round;
+  }
+  .note {
+    font: 600 11.5px var(--__sl-font);
+    fill: var(--wm-fig-muted);
+  }
+  .note.faint {
+    opacity: 0.7;
+    font-style: italic;
+  }
+  .note.ack-label {
+    fill: var(--wm-role-bus);
+  }
+  #wm-sure-arrow path {
+    fill: var(--wm-role-action);
+  }
+  #wm-sure-ack path {
+    fill: var(--wm-role-bus);
+  }
+  .state {
+    display: none;
+  }
+  .wm-sure[data-state='send-ok'] .state.send-ok,
+  .wm-sure[data-state='send-drop'] .state.send-drop,
+  .wm-sure[data-state='sure-ok'] .state.sure-ok,
+  .wm-sure[data-state='sure-drop'] .state.sure-drop {
+    display: inline;
+  }
+</style>
+
+<script>
+  for (const fig of document.querySelectorAll<HTMLElement>('.wm-sure')) {
+    const states = JSON.parse(fig.dataset.states!) as Record<string, string>;
+    const readout = fig.querySelector<HTMLElement>('[data-readout]')!;
+    const call = fig.querySelector<SVGTextElement>('[data-call]')!;
+    const drop = fig.querySelector<HTMLButtonElement>('[data-drop]')!;
+
+    function show() {
+      const state = `${fig.dataset.mode}-${fig.dataset.drop === 'true' ? 'drop' : 'ok'}`;
+      fig.dataset.state = state;
+      readout.textContent = states[state];
+      call.textContent = fig.dataset.mode === 'sure' ? 'reliable' : 'send';
+      for (const b of fig.querySelectorAll<HTMLButtonElement>('button[data-mode]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.mode === fig.dataset.mode));
+      }
+      drop.setAttribute('aria-pressed', fig.dataset.drop!);
+    }
+
+    fig.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+      if (!b) return;
+      if (b.dataset.mode) fig.dataset.mode = b.dataset.mode;
+      if (b.hasAttribute('data-drop')) fig.dataset.drop = String(fig.dataset.drop !== 'true');
+      show();
+    });
+  }
+</script>

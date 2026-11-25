@@ -83,6 +83,8 @@ impl PlayerIdBook {
 pub const MAX_GROUPS: u32 = 1000;
 /// Most fake lag (debug) a group can be given, in ms.
 pub const MAX_FAKE_LAG_MS: u32 = 5000;
+/// Most fake loss (debug), in % of envelopes and confirmations.
+pub const MAX_FAKE_LOSS_PCT: u8 = 90;
 /// A group asked for but not heard from after this long is asked for again.
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 /// A group out of use is stopped once it has been empty this long (past the 1 s it keeps
@@ -224,6 +226,8 @@ struct Orchestrator {
     binary_bus: bool,
     /// Fake network lag per group, in ms (debug).
     lag: BTreeMap<u32, u32>,
+    /// Fake loss for the whole world, in % (debug).
+    fake_loss: u8,
 }
 
 impl Orchestrator {
@@ -583,6 +587,7 @@ impl Orchestrator {
             group_hosts: self.hosts.len() as u32,
             binary_bus: self.binary_bus,
             group_lag: self.group_lag(),
+            fake_loss: self.fake_loss,
         }
     }
 
@@ -633,6 +638,7 @@ pub async fn run(
         players: BTreeMap::new(),
         binary_bus: true,
         lag: BTreeMap::new(),
+        fake_loss: 0,
     };
     bus::set_binary(o.binary_bus);
     let mut last_publish = Instant::now();
@@ -681,6 +687,10 @@ pub async fn run(
                         o.lag.insert(group, ms);
                     }
                     info!(group = format!("{group:04x}"), ms, "debug: fake lag");
+                }
+                if let Some(pct) = cmd.set_loss {
+                    o.fake_loss = pct.min(MAX_FAKE_LOSS_PCT);
+                    info!(pct = o.fake_loss, "debug: fake loss");
                 }
                 if let Some(on) = cmd.binary_bus {
                     o.binary_bus = on;
@@ -752,6 +762,7 @@ pub async fn run(
                 || cur.group_hosts != o.hosts.len() as u32
                 || cur.binary_bus != o.binary_bus
                 || cur.group_lag != o.group_lag()
+                || cur.fake_loss != o.fake_loss
         });
         if changed || running_changed {
             if changed {

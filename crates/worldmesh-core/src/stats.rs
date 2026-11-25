@@ -60,6 +60,10 @@ pub static QUERIES: AtomicU64 = AtomicU64::new(0);
 pub static VIEWS: AtomicU64 = AtomicU64::new(0);
 pub static AREAS: AtomicU64 = AtomicU64::new(0);
 pub static VIEWERS: AtomicU64 = AtomicU64::new(0);
+/// Spatial Layer Cell and gateway: sure envelopes sent again, and given up on. (Groups count
+/// per group.)
+pub static RESENT: AtomicU64 = AtomicU64::new(0);
+pub static LOST: AtomicU64 = AtomicU64::new(0);
 
 static TICK_US_SUM: AtomicU64 = AtomicU64::new(0);
 static TICK_US_MAX: AtomicU64 = AtomicU64::new(0);
@@ -114,6 +118,8 @@ pub fn spawn_reporter(nats: async_nats::Client, role: &'static str, id: u32) {
                 views: VIEWS.swap(0, Relaxed) as f32 / secs,
                 areas: AREAS.swap(0, Relaxed) as f32 / secs,
                 viewers: VIEWERS.load(Relaxed) as u32,
+                resent: RESENT.swap(0, Relaxed) as f32 / secs,
+                lost: LOST.swap(0, Relaxed) as f32 / secs,
                 bus_kinds: bus::MsgKind::ALL
                     .iter()
                     .zip(&bus::OUT_BY_KIND)

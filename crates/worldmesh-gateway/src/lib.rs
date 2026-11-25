@@ -3,6 +3,8 @@
 //! - A player's inputs and commands go to their entity (`entity.<id>`): the bus delivers them
 //!   to whichever Server Entity Group simulates it, wherever that is. They arrive as JSON, are
 //!   checked against the world's input and command types, and travel on as MessagePack.
+//!   Inputs are sent once (a late input is worse than none); commands are sure to arrive:
+//!   the gateway sends each again until the player's group confirms it.
 //! - Every tick it tells the Spatial Layer Cells where each player is looking, and puts each
 //!   player's snapshot together from what those cells send back. A player's view can cover the
 //!   areas of several cells; the gateway merges their parts.
@@ -30,13 +32,16 @@ use tracing::{debug, info, warn};
 use crate::snapshot::Encoder;
 use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
-    Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, GroupCommand, GroupCommandKind,
-    JoinRequest, Kind, PlayerIdRequest, PlayerIds, ProcessStats, SenseDebug, ServerMsg,
-    SnapshotEntity, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
+    AckTo, Acks, Address, Assignment, ClientMsg, DebugCommand, DebugReport, EntityId, GroupCommand,
+    GroupCommandKind, JoinRequest, Kind, PlayerIdRequest, PlayerIds, ProcessStats, SenseDebug,
+    ServerMsg, SnapshotEntity, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers,
+    WireEvent,
 };
+use worldmesh_core::reliable::{Target, Unconfirmed};
 use worldmesh_core::subjects::{
-    entity_subject, gateway_ids_subject, gateway_views_subject, random_gateway_id, ASSIGNMENTS,
-    DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS, PLAYER_IDS, STATS, VIEWERS,
+    entity_subject, gateway_acks_subject, gateway_ids_subject, gateway_views_subject,
+    random_gateway_id, ASSIGNMENTS, DEBUG_COMMANDS, DEBUG_REPORTS, GROUP_COMMANDS, JOINS,
+    PLAYER_IDS, STATS, VIEWERS,
 };
 use worldmesh_sim::world::Rules;
 pub mod snapshot;
@@ -166,6 +171,8 @@ struct AppState {
     /// Latest encoded assignment, sent to players as they connect.
     ownership: Arc<Mutex<Option<Bytes>>>,
     clients: Arc<Mutex<BTreeMap<EntityId, Client>>>,
+    /// Players' commands, until their group confirms them.
+    commands: Arc<Mutex<Unconfirmed>>,
 }
 
 /// A gateway process.
@@ -279,6 +286,7 @@ pub async fn run(
         tokio::spawn(async move {
             while let Some(assignment) = assignments.recv().await {
                 bus::set_binary(assignment.binary_bus);
+                bus::set_fake_loss(assignment.fake_loss);
                 *in_use.lock().unwrap() = assignment.spatial.clone();
                 let Ok(encoded) = serde_json::to_vec(&ServerMsg::Ownership(assignment)) else {
                     continue;
@@ -471,6 +479,41 @@ pub async fn run(
         });
     }
 
+    // Commands: confirmations from groups, and copies of what they haven't confirmed in time.
+    let commands: Arc<Mutex<Unconfirmed>> = Arc::default();
+    {
+        let (commands, nats) = (commands.clone(), nats.clone());
+        let mut acks = bus::subscribe::<Acks>(&nats, &gateway_acks_subject(gateway_id)).await?;
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(a) = acks.recv() => {
+                        let mut commands = commands.lock().unwrap();
+                        for key in a.envelopes {
+                            commands.confirm(a.by, key);
+                        }
+                    }
+                    _ = tokio::time::sleep(time::until_next_tick()) => {
+                        let due = {
+                            let mut commands = commands.lock().unwrap();
+                            let due = commands.due(time::current_tick());
+                            let (resent, lost) = commands.take_counts();
+                            stats::RESENT.fetch_add(resent, Ordering::Relaxed);
+                            stats::LOST.fetch_add(lost, Ordering::Relaxed);
+                            due
+                        };
+                        for env in &due.lost {
+                            warn!(player = env.from.id, "a command was never confirmed by the player's group");
+                        }
+                        for (subject, env) in due.resend {
+                            bus::publish(&nats, subject, &env).await;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     let state = AppState {
         nats,
         rules,
@@ -481,6 +524,7 @@ pub async fn run(
         ids,
         ownership,
         clients,
+        commands,
     };
 
     let app = Router::new()
@@ -665,6 +709,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     }
 
     state.clients.lock().unwrap().remove(&id);
+    // Their entity is about to go: nobody will confirm their commands.
+    state
+        .commands
+        .lock()
+        .unwrap()
+        .retain(|env| env.to != Address::Entity { id });
     stats::PLAYERS.fetch_sub(1, Ordering::Relaxed);
     let leave = GroupCommand {
         to: None,
@@ -766,7 +816,13 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
                     return None;
                 }
             };
-            let env = from_player(id, Kind::Command { msg, body }, true);
+            let mut env = from_player(id, Kind::Command { msg, body }, true);
+            env.ack = Some(AckTo::Gateway(state.gateway));
+            state.commands.lock().unwrap().track(
+                &env,
+                vec![Target::entity(id)],
+                time::current_tick(),
+            );
             bus::publish(&state.nats, entity_subject(id), &env).await;
             None
         }
@@ -789,6 +845,7 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
             regroup,
             binary_bus,
             set_lag,
+            set_loss,
         }) => {
             if !state.options.allow_debug {
                 warn!(id, "debug commands are turned off on this gateway");
@@ -801,6 +858,7 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
                 ?regroup,
                 ?binary_bus,
                 ?set_lag,
+                ?set_loss,
                 "debug command"
             );
             let cmd = DebugCommand {
@@ -809,6 +867,7 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
                 regroup: regroup == Some(true),
                 binary_bus,
                 set_lag,
+                set_loss,
             };
             bus::publish(&state.nats, DEBUG_COMMANDS.to_string(), &cmd).await;
             None

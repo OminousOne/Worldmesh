@@ -1,5 +1,5 @@
 //! A tiny game used by the library's own tests: units walk one tile per tick, and players can
-//! hit, blast, shout, spawn and vanish. Shared with `worldmesh-testing`'s tests through the
+//! hit, blast and shout (sure to land), poke (throwaway), spawn and vanish. Shared with `worldmesh-testing`'s tests through the
 //! `test-game` feature.
 
 use std::sync::Arc;
@@ -44,6 +44,7 @@ pub struct Input {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Command {
     Hit { target: u32 },
+    Poke { target: u32 },
     Blast { x: f32, y: f32, r: f32 },
     Shout,
     Spawn,
@@ -94,13 +95,16 @@ fn walk(me: &mut Me<'_>) {
 fn command(me: &mut Me<'_>, command: &Command) {
     match *command {
         Command::Hit { target } => {
-            me.send(To::Entity(target), Damage(10));
+            me.send_reliable(To::Entity(target), Damage(10));
+        }
+        Command::Poke { target } => {
+            me.send(To::Entity(target), Damage(1));
         }
         Command::Blast { x, y, r } => {
-            me.send(To::Area { x, y, r }, Damage(5));
+            me.send_reliable(To::Area { x, y, r }, Damage(5));
         }
         Command::Shout => {
-            me.send(To::Everyone, Damage(1));
+            me.send_reliable(To::Everyone, Damage(1));
         }
         Command::Spawn => {
             let (x, y) = (me.x + 1.0, me.y);

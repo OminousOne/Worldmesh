@@ -475,6 +475,19 @@ export class MetricsPanel {
             : 'no group reporting',
       },
       {
+        title: 'Sure deliveries (per second)',
+        format: perSec,
+        minMax: 1,
+        series: [
+          { key: 'resent', name: 'Sent again', color: SLOTS[0] },
+          { key: 'lost', name: 'Given up', color: SLOTS[1] },
+        ],
+        note: (r) =>
+          r && r.v.resent != null
+            ? 'sure sends not confirmed in time (plain send never is)'
+            : 'no process reporting',
+      },
+      {
         title: 'Handoffs (per second)',
         format: perSec,
         minMax: 1,
@@ -540,6 +553,8 @@ export class MetricsPanel {
       hitsLocal: sum(groups, (p) => p.actions_local),
       hitsForwarded: sum(groups, (p) => p.actions_forwarded),
       handoffs: sum(groups, (p) => p.handoffs),
+      resent: sum(procs, (p) => p.resent ?? null),
+      lost: sum(procs, (p) => p.lost ?? null),
     };
     // Per group: the first five in use get their own line; the rest fold into "other groups"
     // (the busiest of them for load, the most entities for entities).

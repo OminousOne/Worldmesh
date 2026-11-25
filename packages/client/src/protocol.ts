@@ -41,6 +41,8 @@ export type Assignment = {
   binary_bus: boolean;
   /** Fake lag per group (debug): [group, ms one way]. */
   group_lag: [ProcessId, number][];
+  /** Fake loss (debug): % of envelopes and confirmations every process drops. */
+  fake_loss?: number;
 };
 
 export type Rate = { msgs: number; bytes: number };
@@ -66,6 +68,9 @@ export type ProcessStats = {
   actions_received: number;
   actions_forwarded: number;
   handoffs: number;
+  /** Sure deliveries sent again, and given up on, per second. */
+  resent?: number;
+  lost?: number;
   queries: number;
   views: number;
   areas: number;
@@ -81,7 +86,7 @@ export type SenseDebug = { id: EntityId; x: number; y: number; r: number; found:
 export type BusMsg = {
   from: ProcessId;
   to: ProcessId;
-  kind: 'handoff' | 'command' | 'input' | 'action' | 'area' | 'broadcast' | 'forward';
+  kind: 'handoff' | 'command' | 'input' | 'action' | 'area' | 'broadcast' | 'forward' | 'resend';
   trace: number;
 };
 
@@ -150,6 +155,8 @@ export type DebugCommand = {
   binary_bus?: boolean;
   /** [group, ms one way]; 0 turns it off. */
   set_lag?: [ProcessId, number];
+  /** % of envelopes and confirmations every process drops; 0 turns it off. */
+  set_loss?: number;
 };
 
 export type ClientMsg<I, C = Named> =

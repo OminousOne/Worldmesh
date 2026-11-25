@@ -90,7 +90,7 @@ Every option can also be set with the environment variable under it.
 | --- | --- |
 | `--listen` <br /> `LISTEN` | Where players connect (`/ws`); `/health` answers `ok`. Default `0.0.0.0:8080`. |
 | `--nats-monitor` <br /> `NATS_MONITOR` | NATS's monitoring address (`host:8222`), to show NATS in the metrics. None by default. |
-| `--allow-debug` <br /> `ALLOW_DEBUG` | Accept debug panel commands (scaling, fake lag) from players. Off by default. Development only. |
+| `--allow-debug` <br /> `ALLOW_DEBUG` | Accept debug panel commands (scaling, fake lag, fake loss) from players. Off by default. Development only. |
 
 </div>
 
@@ -100,6 +100,10 @@ Every option can also be set with the environment variable under it.
 | --- | --- |
 | Groups in use | 1,000 |
 | Fake lag per group | 5,000 ms |
+| Fake loss | 90% |
+| Sure delivery: first copy sent again after | 400 ms, then twice as long each time, at most 1 s apart |
+| Sure delivery: given up after | 5 s |
+| Deliveries an entity remembers (so none applies twice) | 10 s |
 | Input scheduled ahead | 5 s. Later ones are pulled in. |
 | Forwarding after a handoff | 1 s |
 | Spatial query results kept | 1 s |

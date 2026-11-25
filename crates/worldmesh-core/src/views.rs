@@ -74,5 +74,7 @@ pub fn from_player(id: EntityId, kind: Kind, traced: bool) -> Envelope {
         trace,
         hops: 0,
         kind,
+        ack: None,
+        resends: 0,
     }
 }

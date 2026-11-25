@@ -49,7 +49,8 @@ Groups and cells: manual for now, from the debug panel (Groups +/-, Spatial Laye
 | Others stutter, own entity fine | Snapshots arriving late: gateway or cell overloaded, or network. Check cell load and gateway CPU |
 | Own entity corrects (snaps back) often | Inputs arriving late (see the panel's "last input arrived ... late"), or client movement code not bit-identical to the server |
 | Bus traffic very high | Big spatial query results: ask only for the components you read (`Query::with::<T>()`), fewer entities (`.nearest(n)`), less often, and make fewer components visible (see the metrics' "Bus traffic by kind") |
-| Actions applied late (+2 ticks or more) | A group is lagging (load near 100%, or fake lag left on: check the group legend) |
+| Actions applied late (+2 ticks or more) | A group is lagging (load near 100%, or fake lag left on: check the group legend), or sure deliveries are being sent again (the "Sure deliveries" chart; fake loss left on?) |
+| Some `send` actions or inputs never land | The bus is dropping messages: a process can't keep up (load near 100%), or fake loss is on. Use `send_reliable` for what must land |
 | Debug panel controls do nothing | Gateway not started with `--allow-debug` |
 
 ## Checklist for production

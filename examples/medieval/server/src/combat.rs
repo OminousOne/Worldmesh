@@ -248,7 +248,7 @@ pub fn use_ability(map: &MapData, me: &mut Me<'_>, ability: Ability, target: Tar
         c.0.retain(|(a, _)| *a != ability);
         c.0.push((ability, tick + time::ticks_in(stats.cooldown_ms)));
     }
-    let trace = me.send(to, Hit { ability });
+    let trace = me.send_reliable(to, Hit { ability });
     let (actor, x, y, group) = (me.id, me.x, me.y, me.group());
     me.emit(Used {
         tick,

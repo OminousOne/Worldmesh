@@ -1,7 +1,7 @@
 // The debug panel: see and change how the world is split while you play.
 //
 // It builds its own DOM (a panel on the right, plus the metrics and bus views) and follows a
-// WorldmeshClient. Scaling and fake lag need the gateway to run with `--allow-debug`.
+// WorldmeshClient. Scaling, fake lag and fake loss need the gateway to run with `--allow-debug`.
 //
 // Drawing the world is the game's job, so the panel doesn't draw overlays itself: it keeps
 // their on/off state in `overlays` (groups, spatial areas, questions, view, raw positions) and
@@ -283,6 +283,20 @@ export class DebugPanel {
     checkbox('binaryBus', 'Optimized internal traffic', 'I', true,
       'Messages between server processes as MessagePack instead of JSON. Applies to every process at once');
     muted('bus-rate');
+    const lossRow = make('div', r, 'row', 'Fake loss ');
+    lossRow.title =
+      'Every process drops this % of the envelopes and confirmations it receives, like an overloaded bus. Throwaway sends and inputs are lost; sure ones are sent again until confirmed. 0 turns it off';
+    const loss = make('input', lossRow, 'wm-loss-pct');
+    Object.assign(loss, { type: 'number', min: '0', max: '90', step: '5', value: '0' });
+    lossRow.append(' % ');
+    const setLoss = () => {
+      const pct = Math.max(0, Math.min(90, Math.round(Number(loss.value) || 0)));
+      loss.value = String(pct);
+      debug({ set_loss: pct });
+    };
+    button(lossRow, 'Set', 'Apply the fake loss to every process', setLoss, true);
+    loss.addEventListener('keydown', (e) => e.key === 'Enter' && setLoss());
+    this.els.lossPct = loss;
 
     make('div', r, 'title', 'Prediction').style.marginTop = '10px';
     checkbox('predict', 'Client prediction', 'P', this.client.predictor?.enabled ?? false);
@@ -340,6 +354,8 @@ export class DebugPanel {
     this.els.spatialRunning.textContent = `of ${a.spatial_running} running`;
     const box = this.boxes.get('binaryBus');
     if (box) box.checked = a.binary_bus;
+    const loss = this.els.lossPct as HTMLInputElement;
+    if (document.activeElement !== loss) loss.value = String(a.fake_loss ?? 0);
     this.updateLegends();
   }
 

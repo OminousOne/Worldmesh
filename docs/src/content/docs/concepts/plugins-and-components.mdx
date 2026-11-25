@@ -153,4 +153,4 @@ Plugins don't call into each other's state. They agree on components. In the med
 
 ## Only change yourself
 
-Game code always runs as one entity, through `Me`, and changes only that entity. Everything else it reads (`me.nearby`, `me.find`) or asks for (`me.send`). That's what lets any entity run on any server: nothing reaches into another entity's memory, so it doesn't matter where that entity is. More in [Entities and actions](/Worldmesh/concepts/entities-and-actions/).
+Game code always runs as one entity, through `Me`, and changes only that entity. Everything else it reads (`me.nearby`, `me.find`) or asks for (`me.send`, `me.send_reliable`). That's what lets any entity run on any server: nothing reaches into another entity's memory, so it doesn't matter where that entity is. More in [Entities and actions](/Worldmesh/concepts/entities-and-actions/).

@@ -83,6 +83,10 @@ pub enum ClientMsg {
         /// Fake network lag for one Server Entity Group: [group, milliseconds] (0 for none).
         #[serde(default)]
         set_lag: Option<(GroupId, u32)>,
+        /// Fake loss for the whole world: the % of envelopes and confirmations every process
+        /// drops as they arrive (0 for none).
+        #[serde(default)]
+        set_loss: Option<u8>,
     },
 }
 
@@ -189,6 +193,8 @@ pub enum BusKind {
     Broadcast,
     /// Passed on by an old owner after a handoff.
     Forward,
+    /// Sent again: it was sent for sure delivery and its sender heard no confirmation in time.
+    Resend,
 }
 
 /// An every-tick stream between two processes, and how many items it carried this tick.
@@ -239,6 +245,10 @@ pub struct Assignment {
     /// Fake network lag per Server Entity Group (debug): (group, milliseconds).
     #[serde(default)]
     pub group_lag: Vec<(GroupId, u32)>,
+    /// Fake loss (debug): the % of envelopes and confirmations every process drops as they
+    /// arrive.
+    #[serde(default)]
+    pub fake_loss: u8,
 }
 
 /// Every server process -> gateways (-> players), once a second.
@@ -279,6 +289,12 @@ pub struct ProcessStats {
     /// Entities handed off per second.
     #[serde(default)]
     pub handoffs: f32,
+    /// Sure deliveries (actions, commands, handoffs) sent again per second because no
+    /// confirmation came back in time, and given up on (never confirmed) per second.
+    #[serde(default)]
+    pub resent: f32,
+    #[serde(default)]
+    pub lost: f32,
     /// Spatial queries per second (group: made; Spatial Layer Cell: answered).
     #[serde(default)]
     pub queries: f32,
@@ -338,6 +354,8 @@ pub struct DebugCommand {
     pub binary_bus: Option<bool>,
     #[serde(default)]
     pub set_lag: Option<(GroupId, u32)>,
+    #[serde(default)]
+    pub set_loss: Option<u8>,
 }
 
 /// Gateway -> orchestrator: a player connected. Where they appear and as what come from the
@@ -435,6 +453,54 @@ pub struct Envelope {
     /// Times forwarded (it gives up after a few).
     pub hops: u8,
     pub kind: Kind,
+    /// Who confirms it arrived, for sure delivery: the process that will send it again until
+    /// it hears back. None: sent once, and lost if the bus drops it.
+    #[serde(default)]
+    pub ack: Option<AckTo>,
+    /// Times it was sent again (0: the first time).
+    #[serde(default)]
+    pub resends: u8,
+}
+
+impl Envelope {
+    /// What its receiver confirms it by: (sender, the sender's number for it).
+    pub fn key(&self) -> (EntityId, u64) {
+        (self.from.id, self.seq)
+    }
+}
+
+/// The process waiting to hear that a sure envelope arrived.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum AckTo {
+    Group(GroupId),
+    Spatial(GroupId),
+    Gateway(u32),
+}
+
+impl AckTo {
+    /// Where its confirmations go.
+    pub fn subject(self) -> String {
+        match self {
+            AckTo::Group(id) => crate::subjects::group_acks_subject(id),
+            AckTo::Spatial(id) => crate::subjects::spatial_acks_subject(id),
+            AckTo::Gateway(id) => crate::subjects::gateway_acks_subject(id),
+        }
+    }
+}
+
+/// Confirmations, to the process that sent the envelopes: each listed one arrived. One
+/// message per tick from each process that got something sure from it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Acks {
+    /// The group or Spatial Layer Cell confirming.
+    pub by: u32,
+    /// Actions and commands, by [`Envelope::key`].
+    #[serde(default)]
+    pub envelopes: Vec<(EntityId, u64)>,
+    /// Handoffs: (entity, the old group's number for it).
+    #[serde(default)]
+    pub handoffs: Vec<(EntityId, u64)>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]

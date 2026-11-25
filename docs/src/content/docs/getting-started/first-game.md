@@ -156,12 +156,12 @@ A command comes from the entity's own player. This one sends an action to the ta
 ```rust
 fn tag(me: &mut Me<'_>, &Tag { target }: &Tag) {
     if me.get::<It>() == Some(&It(true)) {
-        me.send(To::Entity(target), YouAreIt);
+        me.send_reliable(To::Entity(target), YouAreIt);
     }
 }
 ```
 
-The action arrives on the next tick, in the target's group: on another machine, or even while the target is moving between groups. The target decides what it does:
+The action arrives on the next tick, in the target's group: on another machine, or even while the target is moving between groups. A lost tag would leave nobody "it", so it's sent with `send_reliable`: sure to land, exactly once. (Plain `send` is for things the next tick replaces anyway.) The target decides what it does:
 
 ```rust
 /// Judged by where we both stood on the tick the tag was sent. The sender's position
@@ -171,7 +171,7 @@ fn you_are_it(me: &mut Me<'_>, _: &YouAreIt, from: &Incoming) {
     let in_reach = (x - from.from.x).hypot(y - from.from.y) <= REACH;
     if in_reach && me.get::<It>() != Some(&It(true)) {
         me.insert(It(true));
-        me.send(To::Entity(from.from.id), NotIt);
+        me.send_reliable(To::Entity(from.from.id), NotIt);
         let who = me.id;
         me.emit_involving(Tagged { by: from.from.id, who }, &[from.from.id]);
     }

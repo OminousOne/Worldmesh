@@ -6,7 +6,8 @@
 //! game's view of each, as opaque bytes). From those copies it
 //!
 //! - answers spatial queries (back to the querying group, before its next tick),
-//! - passes area actions on to every group with an entity in the circle,
+//! - passes area actions on to every group with an entity in the circle (a sure one is
+//!   confirmed to its sender, and sent again to each group until that group confirms it),
 //! - builds each player's view of its area for the gateway.
 //!
 //! Everything it holds is rebuilt from the groups' reports every tick, so there is nothing to
@@ -23,14 +24,15 @@ use tracing::{debug, info};
 
 use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
-    Address, Assignment, BusKind, BusMsg, CellView, DebugReport, Envelope, EventAt, GroupId,
-    GroupReport, Heartbeat, Kind, Seen, SenseAnswer, SenseAnswers, SenseDebug, SenseQuery,
-    SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
+    AckTo, Acks, Address, Assignment, BusKind, BusMsg, CellView, DebugReport, EntityId, Envelope,
+    EventAt, GroupId, GroupReport, Heartbeat, Kind, Seen, SenseAnswer, SenseAnswers, SenseDebug,
+    SenseQuery, SpatialViews, StreamKind, StreamMsg, ViewEntity, Viewer, Viewers, WireEvent,
 };
+use worldmesh_core::reliable::{too_old, Handled, Target, Unconfirmed};
 use worldmesh_core::subjects::{
     gateway_views_subject, group_inbox_subject, group_senses_subject, random_process_id,
-    spatial_inbox_subject, spatial_reports_subject, ASSIGNMENTS, DEBUG_REPORTS, HEARTBEATS,
-    SPATIAL_ID_BIT, VIEWERS,
+    spatial_acks_subject, spatial_inbox_subject, spatial_reports_subject, ASSIGNMENTS,
+    DEBUG_REPORTS, HEARTBEATS, SPATIAL_ID_BIT, VIEWERS,
 };
 use worldmesh_core::{bus, stats, time};
 
@@ -68,6 +70,12 @@ pub struct SpatialWorld {
     /// Where each gateway's players are looking: gateway -> (tick it said so, its players).
     viewers: BTreeMap<u32, (u64, Vec<Viewer>)>,
     outbox: Vec<(String, Envelope)>,
+    /// Sure area actions passed on, until each group we passed them to confirms.
+    sent: Unconfirmed,
+    /// Sure area actions passed on lately, so a copy isn't passed on again.
+    passed: Handled<(EntityId, u64)>,
+    /// Confirmations to send at the end of the tick, to each group that sent us something sure.
+    acks: BTreeMap<AckTo, Acks>,
     bus_log: Vec<BusMsg>,
 }
 
@@ -85,6 +93,9 @@ impl SpatialWorld {
             events: Vec::new(),
             viewers: BTreeMap::new(),
             outbox: Vec::new(),
+            sent: Unconfirmed::default(),
+            passed: Handled::default(),
+            acks: BTreeMap::new(),
             bus_log: Vec::new(),
         }
     }
@@ -92,6 +103,9 @@ impl SpatialWorld {
     pub fn set_assignment(&mut self, assignment: &Assignment) {
         self.owners = Some(assignment.owners.clone());
         self.active = assignment.spatial.contains(&self.spatial_id);
+        // Groups taken out of use won't confirm anything any more.
+        self.sent
+            .retain_confirmers(|id| assignment.groups.contains(&id));
         if !self.active {
             self.held.clear();
             self.heard.clear();
@@ -173,18 +187,30 @@ impl SpatialWorld {
         self.heard.retain(|g, _| held.contains_key(g));
     }
 
-    /// An area action: pass it on, once, to every group with an entity in the circle (other
-    /// than the sender). Each group delivers it to its own entities by their exact positions.
-    pub fn route_area(&mut self, env: Envelope) {
+    /// An area action, arriving at tick `tick`: pass it on, once, to every group with an
+    /// entity in the circle (other than the sender). Each group delivers it to its own
+    /// entities by their exact positions. A sure one is confirmed to its sender (every copy:
+    /// an earlier confirmation may have been lost) and kept until each group confirms it.
+    pub fn route_area(&mut self, env: Envelope, tick: u64) {
         self.bus_log.push(BusMsg {
             from: env.via,
             to: self.spatial_id,
-            kind: BusKind::Area,
+            kind: if env.resends > 0 {
+                BusKind::Resend
+            } else {
+                BusKind::Area
+            },
             trace: env.trace,
         });
         let (Address::Area { x, y, r }, Kind::Action { .. }) = (env.to, &env.kind) else {
             return;
         };
+        if let Some(to) = env.ack {
+            self.acks.entry(to).or_default().envelopes.push(env.key());
+            if too_old(env.from.tick, tick) || !self.passed.first(env.key(), tick) {
+                return; // a copy of one we already passed on (or too old to tell)
+            }
+        }
         stats::AREAS.fetch_add(1, Relaxed);
         let mut groups: Vec<GroupId> = self
             .entities()
@@ -193,15 +219,61 @@ impl SpatialWorld {
             .collect();
         groups.sort_unstable();
         groups.dedup();
+        let mut copy = env;
+        copy.via = self.spatial_id;
+        if copy.ack.is_some() {
+            // We pass it on: the groups confirm it to us now.
+            copy.ack = Some(AckTo::Spatial(self.spatial_id));
+            copy.resends = 0;
+            let targets = groups.iter().map(|&g| Target::inbox(g)).collect();
+            self.sent.track(&copy, targets, tick);
+        }
         for group in groups {
-            let mut copy = env.clone();
-            copy.via = self.spatial_id;
-            self.outbox.push((group_inbox_subject(group), copy));
+            self.outbox.push((group_inbox_subject(group), copy.clone()));
+        }
+    }
+
+    /// Confirmations from groups we passed sure area actions to.
+    pub fn receive_acks(&mut self, acks: Acks) {
+        for key in acks.envelopes {
+            self.sent.confirm(acks.by, key);
+        }
+    }
+
+    /// Pass on again what a group hasn't confirmed in time (to that group only), and give up
+    /// on what's been waiting too long. Counted in the process's stats.
+    pub fn resend(&mut self, tick: u64) {
+        let due = self.sent.due(tick);
+        self.outbox.extend(due.resend);
+        let (resent, lost) = self.sent.take_counts();
+        stats::RESENT.fetch_add(resent, Relaxed);
+        stats::LOST.fetch_add(lost, Relaxed);
+        for env in due.lost {
+            debug!(
+                from = env.from.id,
+                seq = env.seq,
+                "an area action was never confirmed"
+            );
         }
     }
 
     pub fn take_outbox(&mut self) -> Vec<(String, Envelope)> {
         std::mem::take(&mut self.outbox)
+    }
+
+    /// Confirmations to publish: (subject, confirmations), one per group that sent us
+    /// something sure.
+    pub fn take_acks(&mut self) -> Vec<(String, Acks)> {
+        let by = self.spatial_id;
+        std::mem::take(&mut self.acks)
+            .into_iter()
+            .map(|(to, acks)| (to.subject(), Acks { by, ..acks }))
+            .collect()
+    }
+
+    /// Sure area actions passed on and not yet confirmed by every group.
+    pub fn unconfirmed(&self) -> usize {
+        self.sent.len()
     }
 
     /// Answer every question received since the last round, one message per asking group.
@@ -413,6 +485,7 @@ pub async fn run(
     let mut reports =
         bus::subscribe::<GroupReport>(&nats, &spatial_reports_subject(spatial_id)).await?;
     let mut inbox = bus::subscribe::<Envelope>(&nats, &spatial_inbox_subject(spatial_id)).await?;
+    let mut acks = bus::subscribe::<Acks>(&nats, &spatial_acks_subject(spatial_id)).await?;
     let mut viewers = bus::subscribe::<Viewers>(&nats, VIEWERS).await?;
 
     stats::spawn_reporter(nats.clone(), "spatial", spatial_id);
@@ -449,14 +522,16 @@ pub async fn run(
             // Area actions go straight on, without waiting for the tick: the target groups
             // should have them before their next tick.
             Some(env) = inbox.recv() => {
-                world.route_area(env);
+                world.route_area(env, time::current_tick());
                 for (subject, env) in world.take_outbox() {
                     bus::publish(&nats, subject, &env).await;
                 }
             }
+            Some(a) = acks.recv() => world.receive_acks(a),
             Some(v) = viewers.recv() => world.receive_viewers(v),
             Some(a) = assignments.recv() => {
                 bus::set_binary(a.binary_bus);
+                bus::set_fake_loss(a.fake_loss);
                 world.set_assignment(&a);
             }
             _ = tokio::time::sleep_until(wake) => {
@@ -505,6 +580,13 @@ async fn finish_tick(nats: &async_nats::Client, world: &mut SpatialWorld, tick: 
     let started = std::time::Instant::now();
     let id = world.spatial_id;
     world.expire(Instant::now());
+    world.resend(tick);
+    for (subject, env) in world.take_outbox() {
+        bus::publish(nats, subject, &env).await;
+    }
+    for (subject, acks) in world.take_acks() {
+        bus::publish(nats, subject, &acks).await;
+    }
     let mut streams = Vec::new();
     for (group, answers) in world.answer(tick) {
         streams.push(StreamMsg {
@@ -549,6 +631,7 @@ mod tests {
     use bytes::Bytes;
     use worldmesh_core::config::ViewShape;
     use worldmesh_core::protocol::{Facts, Reported};
+    use worldmesh_core::subjects::group_acks_subject;
 
     const WEST: u32 = 0x8001;
     const EAST: u32 = 0x8002;
@@ -584,6 +667,7 @@ mod tests {
             group_hosts: 1,
             binary_bus: false,
             group_lag: Vec::new(),
+            fake_loss: 0,
         }
     }
 
@@ -642,6 +726,8 @@ mod tests {
                 msg: 0,
                 body: vec![0xc0],
             },
+            ack: None,
+            resends: 0,
         }
     }
 
@@ -817,7 +903,7 @@ mod tests {
             vec![],
         ));
         s.receive_report(report(3, 1000, vec![entity(4, 28.0, 28.0)], vec![]));
-        s.route_area(area(50, 20.0, 20.0, 2.5));
+        s.route_area(area(50, 20.0, 20.0, 2.5), 1000);
         let out = s.take_outbox();
         let subjects: Vec<String> = out.iter().map(|(s, _)| s.clone()).collect();
         assert_eq!(
@@ -830,10 +916,60 @@ mod tests {
     }
 
     #[test]
+    fn a_sure_area_action_is_confirmed_passed_on_once_and_sent_again_to_silent_groups() {
+        use worldmesh_core::reliable::resend_after_ticks;
+        let mut s = cell();
+        s.receive_report(report(1, 1000, vec![entity(1, 20.0, 20.0)], vec![]));
+        s.receive_report(report(2, 1000, vec![entity(2, 20.5, 20.0)], vec![]));
+        let mut sure = area(50, 20.0, 20.0, 2.5);
+        sure.ack = Some(AckTo::Group(3));
+        s.route_area(sure.clone(), 1000);
+        let out = s.take_outbox();
+        assert_eq!(out.len(), 2);
+        assert!(out
+            .iter()
+            .all(|(_, e)| e.ack == Some(AckTo::Spatial(WEST)) && e.key() == (50, 1)));
+        // The sender's group didn't hear back, so it sends it again: confirmed, not passed on.
+        sure.resends = 1;
+        s.route_area(sure, 1001);
+        assert!(s.take_outbox().is_empty());
+        assert_eq!(
+            s.take_acks(),
+            vec![(
+                group_acks_subject(3),
+                Acks {
+                    by: WEST,
+                    envelopes: vec![(50, 1), (50, 1)],
+                    handoffs: vec![],
+                }
+            )]
+        );
+        // Group 1 confirms; group 2 doesn't, so it alone gets a copy.
+        s.receive_acks(Acks {
+            by: 1,
+            envelopes: vec![(50, 1)],
+            handoffs: vec![],
+        });
+        s.resend(1000 + resend_after_ticks());
+        let again = s.take_outbox();
+        assert_eq!(
+            again.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(),
+            vec![group_inbox_subject(2)]
+        );
+        assert_eq!(again[0].1.resends, 1);
+        s.receive_acks(Acks {
+            by: 2,
+            envelopes: vec![(50, 1)],
+            handoffs: vec![],
+        });
+        assert_eq!(s.unconfirmed(), 0);
+    }
+
+    #[test]
     fn the_sender_alone_in_its_circle_gets_nothing_back() {
         let mut s = cell();
         s.receive_report(report(1, 1000, vec![entity(50, 20.0, 20.0)], vec![]));
-        s.route_area(area(50, 20.0, 20.0, 2.5));
+        s.route_area(area(50, 20.0, 20.0, 2.5), 1000);
         assert!(s.take_outbox().is_empty());
     }
 

@@ -56,7 +56,7 @@ More handlers can be added later with `client.listen(handlers)`, and listeners f
 | `sendCommand(name, data)` | A command for your entity, by name |
 | `on(name, fn)` | `fn(data, event)` for every event named `name`; returns a function that stops it |
 | `setSettings({ compact?, debug?, stats? })` | Switches compact snapshots, debug traffic and stats |
-| `sendDebug(command)` | Scaling, regroup, bus encoding, fake lag (`--allow-debug` gateways) |
+| `sendDebug(command)` | Scaling, regroup, bus encoding, fake lag, fake loss (`--allow-debug` gateways) |
 | `fakeLatency`, `fakeJitter` | Simulated delay on everything sent and received (ms) |
 | `predictor` | The `Predictor`, if prediction is on: `enabled`, `lead`, `stats`, `tick`, `predicted` |
 | `world`, `welcome`, `assignment`, `tickMs`, `status`, `lastTick` | The latest of each, as received |

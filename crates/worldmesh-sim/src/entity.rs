@@ -4,6 +4,7 @@ use std::any::TypeId;
 
 use serde::{Deserialize, Serialize};
 use worldmesh_core::protocol::{EntityId, Part};
+use worldmesh_core::reliable::Handled;
 
 use crate::component::{AnyComponent, Bundle, Component};
 use crate::world::Rules;
@@ -133,10 +134,11 @@ pub(crate) struct Meta {
     pub last_tick: u64,
     /// Numbers the envelopes it sends, so receivers never apply one twice.
     pub seq: u64,
-    /// (sender, number, sent by the gateway) of the last envelopes delivered to it. A player's
-    /// commands (numbered by the gateway) and their entity's actions (numbered by the entity)
-    /// can share a number, hence the flag.
-    pub recent: Vec<(EntityId, u64, bool)>,
+    /// (sender, number, sent by the gateway) of the envelopes delivered to it lately, so a
+    /// copy (sent again, or forwarded as well as sent directly) never applies twice. A
+    /// player's commands (numbered by the gateway) and their entity's actions (numbered by
+    /// the entity) can share a number, hence the flag.
+    pub recent: Handled<(EntityId, u64, bool)>,
     /// Where it stood at the end of recent ticks: (tick, x, y).
     pub trail: Vec<(u64, f32, f32)>,
     /// A player's inputs not simulated yet: (tick, sub-step, sequence number, input). Only the

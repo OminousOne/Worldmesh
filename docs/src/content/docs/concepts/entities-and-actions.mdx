@@ -1,9 +1,10 @@
 ---
 title: Entities and actions
-description: What an entity is, how entities affect each other across servers, and what you can trust when an action lands.
+description: What an entity is, how entities affect each other across servers, when an action is sure to land, and what you can trust when it does.
 ---
 
 import ActionTrip from '../../../components/diagrams/ActionTrip.astro';
+import SureDelivery from '../../../components/diagrams/SureDelivery.astro';
 
 ## Entities
 
@@ -29,7 +30,14 @@ An entity's components move with it to whichever group simulates it next, so kee
 
 ## Actions
 
-Entities affect each other only through actions. `me.send(to, action)` sends one:
+Entities affect each other only through actions. There are two ways to send one, like UDP and TCP:
+
+| Call | If the bus drops it |
+| --- | --- |
+| `me.send(to, action)` | It's lost. Use it for anything the next tick replaces anyway, like "still chasing you" or a cosmetic poke. Costs nothing extra. |
+| `me.send_reliable(to, action)` | It's sent again until it lands. Use it for what must land: damage, items, "you're it". |
+
+Both reach the same handlers, so the receiver doesn't care which was used. `to` says who gets it:
 
 | `To` | Who gets it |
 | --- | --- |
@@ -45,13 +53,33 @@ Every action is delivered on the tick after it was sent, wherever the target is:
 
 <ActionTrip />
 
+### Sure to land
+
+NATS delivers each message at most once, and drops messages when a process can't keep up. A `send` that's dropped is gone. A `send_reliable` is kept by the sender's group until the receiving group confirms it:
+
+<SureDelivery />
+
+- **Confirmations** are batched: one message per tick to each process that sent something sure.
+- **Sent again** if no confirmation comes back within 400 ms, then waiting twice as long each time, up to 1 s between copies.
+- **Given up** after 5 s, when the target no longer exists or its process can't be reached. It's counted in the stats, and the debug panel shows it. (On a very lossy bus it may still have landed, with every confirmation dropped.)
+- **Late copies land late.** Actions from one sender can then land out of order. Each still says when it was sent (`from.tick`), so judge it by that, as below.
+- **Area and everyone actions** are confirmed hop by hop: the sender's group waits for each Spatial Layer Cell, and each cell waits for every group it passed the action to. So it reaches everyone in the circle, as the cells see it.
+
+Some things are always sure, and one never is:
+
+| Message | Delivery |
+| --- | --- |
+| Players' commands | Sure: the gateway keeps each one until the player's group confirms it |
+| Handoffs | Sure: the old group keeps the entity until the new group confirms it arrived |
+| Players' inputs | Sent once. An input arriving late is worse than none, but a dropped one leaves the previous input in force until the next |
+
+:::note
+Sure means sure while the processes stay up. If a group's process crashes, the sure actions it was still waiting on die with it, along with its entities ([issue #8](https://github.com/OminousOne/Worldmesh/issues/8)).
+:::
+
 ### Never twice
 
-Each action is numbered by its sender, and receivers drop numbers they've already seen. So an action is never applied twice, even when a handoff means it arrives by two routes.
-
-:::caution
-NATS delivers each message at most once. Under overload, such as a subscriber that can't keep up, it drops messages, and a dropped action is lost. Resending lost actions is planned in [issue #2](https://github.com/OminousOne/Worldmesh/issues/2).
-:::
+Each action is numbered by its sender. A group remembers what each of its entities received for 10 s, longer than anyone keeps sending, and drops numbers it has already seen. A copy sent so long ago that it might have been forgotten is confirmed but not applied. So an action is never applied twice, however it was sent, even when a handoff means it arrives by two routes.
 
 ### What you can trust
 
@@ -89,14 +117,14 @@ if reach > SWORD_RANGE {
 
 The medieval example splits each ability in two:
 
-1. **The user's side**, in the user's group (a command handler or a system): alive? cooldown ready? target within reach? Then `me.send` it.
+1. **The user's side**, in the user's group (a command handler or a system): alive? cooldown ready? target within reach? Then `me.send_reliable` it.
 2. **The target's side**, in the target's group (an action handler): was I in reach, and in sight, when it was sent? Then apply it.
 
 Each side checks what only it knows exactly. Neither needs the other's state.
 
 ## Commands
 
-A command is a player's request. The browser sends it by name, like `client.sendCommand('use', { ability: 'bow' })`. The gateway checks it against the type registered under that name and delivers it to the player's own entity on the next tick.
+A command is a player's request. The browser sends it by name, like `client.sendCommand('use', { ability: 'bow' })`. The gateway checks it against the type registered under that name and delivers it to the player's own entity on the next tick. Commands are sure to arrive, exactly once.
 
 A browser can't send a command to anyone else's entity, or send an action at all: the gateway accepts only names registered as commands, and only for the sender's own entity.
 

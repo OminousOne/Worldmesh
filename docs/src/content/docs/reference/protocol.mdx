@@ -22,11 +22,11 @@ Each message has a `t` field.
 { "t": "settings", "compact": true, "debug": false, "stats": false }
 
 { "t": "debug", "set_groups": 4, "set_spatial": 3, "regroup": true,
-  "binary_bus": true, "set_lag": [12345, 200] }
+  "binary_bus": true, "set_lag": [12345, 200], "set_loss": 30 }
 ```
 
 - `input`: your world's input, to take effect at sub-step `sub` of tick `tick` (tick 0: as soon as possible). Dropped unless it parses as your input type.
-- `command`: one of your world's commands, by name, for your own entity. Dropped unless `name` is registered as a command (not an action or event) and `command` parses as its type.
+- `command`: one of your world's commands, by name, for your own entity. Dropped unless `name` is registered as a command (not an action or event) and `command` parses as its type. From the gateway on, it's sure to arrive: the gateway sends it again until your group confirms it.
 - `settings`: compact binary snapshots or JSON; whether to include debug traffic; whether to get every process's `stats` once a second (the debug panel asks for them). Until the first `settings`, snapshots are JSON without debug traffic or stats.
 - `debug`: every field optional. Refused unless the gateway runs with `--allow-debug`.
 
@@ -52,7 +52,7 @@ Each message has a `t` field.
 { "t": "ownership", "version": 4, "groups": [5, 9], "spatial": [32769, 32770],
   "owners": [32769, "..."], "chunk_size": 8, "chunks_x": 8, "chunks_y": 8,
   "spatial_running": 3, "groups_running": 2, "group_hosts": 2,
-  "binary_bus": true, "group_lag": [] }
+  "binary_bus": true, "group_lag": [], "fake_loss": 0 }
 
 { "t": "input_ack", "tick": 1234, "sub": 5, "early_ms": 42 }
 

@@ -43,7 +43,7 @@ A few subjects reach every process of a role: assignments, where players are loo
 ## In production
 
 :::danger
-Never pass `--allow-debug` to a public gateway. It lets any connected player rescale the world and add fake lag.
+Never pass `--allow-debug` to a public gateway. It lets any connected player rescale the world and add fake lag or loss.
 :::
 
 - **Clocks**: every process works out the current tick from its system clock, so keep hosts in sync with NTP. A host a few ms off delivers a few ms early or late; one a whole tick off makes its groups lag.

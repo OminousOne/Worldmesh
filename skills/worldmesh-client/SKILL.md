@@ -76,7 +76,7 @@ panel.overlays.groups;                // groups | spatial | senses | view | ghos
 panel.addSection('My game');          // an element for your own controls
 ```
 
-The gateway needs `--allow-debug` for scaling and fake lag. Never in production.
+The gateway needs `--allow-debug` for scaling, fake lag and fake loss. Never in production.
 
 ## Checklist
 

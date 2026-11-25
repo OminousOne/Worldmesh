@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 use worldmesh_core::codec;
 use worldmesh_core::config::WorldConfig;
 use worldmesh_core::protocol::{
-    Address, EntityId, Envelope, EventAt, Facts, GroupId, Kind, NewEntity, Part, Seen, SenseQuery,
+    AckTo, Address, EntityId, Envelope, EventAt, Facts, GroupId, Kind, NewEntity, Part, Seen,
+    SenseQuery,
 };
 
 use crate::component::{Component, Message, Wire};
@@ -301,10 +302,30 @@ impl<'a> Me<'a> {
         id
     }
 
-    /// Send an action. It's delivered on the next tick wherever the target is (even on
-    /// another machine, or moving between groups), exactly once, stamped with this entity's
-    /// id, position and the current tick. Returns its trace (to tag events with).
+    /// Send an action, once. It lands on the next tick wherever the target is (even on another
+    /// machine, or moving between groups), stamped with this entity's id, position and the
+    /// current tick. If the bus drops it (an overloaded process), it's lost: use this for
+    /// things the next tick replaces anyway ("still chasing you"), and
+    /// [`Me::send_reliable`] for what must land (damage, items). Never applied twice.
+    /// Returns its trace (to tag events with).
     pub fn send<A: Message>(&mut self, to: To, action: A) -> u64 {
+        self.send_action(to, action, false)
+    }
+
+    /// Send an action that's sure to land, exactly once: the receiving group confirms it, and
+    /// until it does this entity's group sends it again (after 400 ms, then waiting longer
+    /// each time). Normally it lands on the next tick like [`Me::send`]; a copy sent again
+    /// lands later, so actions from one sender can then land out of order (each still says
+    /// when it was sent, in [`Incoming::from`]). After 5 s with no confirmation (the target
+    /// no longer exists, or its group's process is unreachable) it's given up and counted as
+    /// lost in the stats. An area or everyone action is confirmed by each process it passes
+    /// through, so it reaches everyone in the circle (as the Spatial Layer Cells see it) or
+    /// everywhere. Returns its trace.
+    pub fn send_reliable<A: Message>(&mut self, to: To, action: A) -> u64 {
+        self.send_action(to, action, true)
+    }
+
+    fn send_action<A: Message>(&mut self, to: To, action: A, sure: bool) -> u64 {
         let Some(msg) = self.message_id::<A>(Category::Action) else {
             return 0;
         };
@@ -337,6 +358,8 @@ impl<'a> Me<'a> {
             trace,
             hops: 0,
             kind: Kind::Action { msg, body },
+            ack: sure.then_some(AckTo::Group(self.group)),
+            resends: 0,
         };
         self.requests.envelopes.push(env);
         trace

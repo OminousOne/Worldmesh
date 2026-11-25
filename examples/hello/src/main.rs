@@ -81,7 +81,7 @@ impl Plugin for TagGame {
 
 fn tag(me: &mut Me<'_>, &Tag { target }: &Tag) {
     if me.get::<It>() == Some(&It(true)) {
-        me.send(To::Entity(target), YouAreIt);
+        me.send_reliable(To::Entity(target), YouAreIt);
     }
 }
 
@@ -92,7 +92,7 @@ fn you_are_it(me: &mut Me<'_>, _: &YouAreIt, from: &Incoming) {
     let in_reach = (x - from.from.x).hypot(y - from.from.y) <= REACH;
     if in_reach && me.get::<It>() != Some(&It(true)) {
         me.insert(It(true));
-        me.send(To::Entity(from.from.id), NotIt);
+        me.send_reliable(To::Entity(from.from.id), NotIt);
         let who = me.id;
         me.emit_involving(
             Tagged {

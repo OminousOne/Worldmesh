@@ -79,15 +79,15 @@ Components and messages derive `Component` / `Message` plus `Serialize, Deserial
 - Time: `me.tick()`, `me.group()`, `me.kind()`, `me.config()`, `me.trace()`, `me.position_at(tick)`.
 - Inputs (in systems): `for t in me.inputs::<Move>() { t.sub, t.input }`.
 - Change itself: `me.insert(c)`, `me.remove::<T>()`, `me.get_mut::<T>()`, `me.despawn()`.
-- Do: `me.send(To::Entity(id) | To::Area { x, y, r } | To::Everyone, action) -> trace`, `me.emit(event)`, `me.emit_at(x, y, event)`, `me.emit_involving(event, &[player_ids])`, `me.spawn(Spawn::new("bot", x, y).with(c))`.
+- Do: `me.send_reliable(to, action) -> trace` (sure to land, exactly once: damage, items, state changes) or `me.send(to, action) -> trace` (once; lost if the bus drops it: things the next tick replaces), with `to` = `To::Entity(id) | To::Area { x, y, r } | To::Everyone`; `me.emit(event)`, `me.emit_at(x, y, event)`, `me.emit_involving(event, &[player_ids])`, `me.spawn(Spawn::new("bot", x, y).with(c))`.
 - Know: `me.local()` (own group, exact); `me.query(r)` or `me.query(Query::within(r).nearest(n).target(id).with::<T>())` (ask; answer next tick); `me.sensed()`, `me.nearby(r)`, `me.find(id)`. These give `Nearby` (`id`, `x`, `y`, `group`, `player`, `local`, `kind()`, `get::<T>()`, `has::<T>()`), which only read **visible** components.
 
 ## Rules (follow all of them)
 
 1. Worldmesh is only the networking. Every game feature (even walking) is a component plus a system or handler in your plugin.
 2. Game code runs only in systems and command/action handlers, through `me`, and **changes only the entity it runs for**. Plugins are shared and read-only: put every per-entity value in a component.
-3. Change another entity only by `me.send` an action. Never store state about other entities outside your own components; they may be on another machine.
-4. Actions land on the next tick, wherever the target is, even mid-handoff, and are never applied twice. Don't add retries, acks or delays.
+3. Change another entity only by sending it an action: `me.send_reliable` if it must land, `me.send` if the next tick replaces it anyway. Never store state about other entities outside your own components; they may be on another machine.
+4. Actions land on the next tick, wherever the target is, even mid-handoff, and are never applied twice. `send_reliable` is resent by Worldmesh until confirmed (a resent one lands late; judge it by `from.from.tick`). Don't add your own retries, acks or delays.
 5. Split abilities in two: the user's side (command handler or system: alive, cooldown, a point in reach) sends; the target's side (action handler) checks and applies.
 6. On the target's side, judge with `from.from` (sender id, group, x, y, tick: stamped by the sender's group, never by a client) and `me.position_at(from.from.tick)`. Never trust positions or ids a client put in a command.
 7. Plugins meet through components: one writes a component the other reads (medieval: Combat inserts `Immobile` on death, Movement skips immobile units; Combat writes `LastHit`, Bots reads it), or registers another handler for the same action. Expose a `pub fn` (like medieval's `combat::use_ability`) when another plugin should act exactly as a player would.
@@ -116,12 +116,12 @@ w.hand_off(bob, 1); w.run_until(60, |w| /* condition */ true); w.run_ms(3000);
 w.rules().command_from_json("use", serde_json::json!({ "slot": 0, "target": 2 })); // what the gateway accepts
 ```
 
-Test both sides of every check, entities in different groups, a handoff in the same step as an action, what players can see, and that your client's JSON parses under the name it sends.
+Test both sides of every check, entities in different groups, a handoff in the same step as an action, a lossy bus (`w.lose(30)`, then run until `w.unconfirmed() == 0`) for anything sent with `send_reliable`, what players can see, and that your client's JSON parses under the name it sends.
 
 ## Checklist for a new ability or behaviour
 
 - [ ] Components for its state (hidden unless others must see it), added to the kinds that need them.
-- [ ] User's side in a command handler (players) or a system (AI): validate, update a cooldown component, `me.send`, `me.emit` a "used" event with the returned trace.
+- [ ] User's side in a command handler (players) or a system (AI): validate, update a cooldown component, `me.send_reliable`, `me.emit` a "used" event with the returned trace.
 - [ ] Target's side in an action handler: check with `from.from` and `position_at`, change `me`'s own components, `me.emit_involving(event, &[from.from.id])`.
 - [ ] Area version: `To::Area { x, y, r }`; `from.area.is_some()` on the receiving side.
 - [ ] TestWorld tests across two groups, including out-of-reach.

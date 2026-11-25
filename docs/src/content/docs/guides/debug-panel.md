@@ -3,7 +3,7 @@ title: The debug panel
 description: Watch and change how the world is split while you play, with @worldmesh/debug.
 ---
 
-`@worldmesh/debug` is a panel for development. It shows who simulates what and whose area is whose, scales the world, adds fake lag to one server at a time, and draws every message crossing the bus.
+`@worldmesh/debug` is a panel for development. It shows who simulates what and whose area is whose, scales the world, adds fake lag to one server at a time or fake loss to all of them, and draws every message crossing the bus.
 
 ```ts
 import { DebugPanel } from '@worldmesh/debug';
@@ -27,10 +27,12 @@ The scaling and lag controls only work when the gateway runs with `--allow-debug
 | --- | --- |
 | Server Entity Groups | Groups in use (type any number), entities per group, regroup by position, fake lag for one group |
 | Spatial Layer Cells | Cells in use, entities and players per cell, spatial queries per second |
-| Network | Compact or JSON snapshots, MessagePack or JSON on the bus, bytes per second each way |
+| Network | Compact or JSON snapshots, MessagePack or JSON on the bus, bytes per second each way, fake loss |
 | Prediction | On or off, how far ahead you run, how early your last input arrived, corrections |
-| Metrics | CPU, memory, traffic and load per process, over the last minute |
-| Bus traffic | Every process around NATS, messages moving between them, recent actions traced hop by hop |
+| Metrics | CPU, memory, traffic and load per process over the last minute, and sure deliveries sent again or given up |
+| Bus traffic | Every process around NATS, messages moving between them (copies sent again in their own colour), recent actions traced hop by hop |
+
+**Fake loss** makes every process drop that share of the envelopes and confirmations it receives, like an overloaded bus. Try 30%: `me.send_reliable` actions, commands and handoffs still land, some a little late, and the "Sure deliveries" chart shows the copies sent again. `me.send` actions and inputs go missing: your unit may keep walking after you let go, until your next input.
 
 With several gateways, the panel adds up their numbers and draws them as one in the bus view.
 
@@ -79,4 +81,4 @@ new DebugPanel({
 });
 ```
 
-Everything one action leads to shares its trace id: `me.send` returns it, and `Incoming::trace` carries it on the receiving side.
+Everything one action leads to shares its trace id: `me.send` and `me.send_reliable` return it, and `Incoming::trace` carries it on the receiving side.

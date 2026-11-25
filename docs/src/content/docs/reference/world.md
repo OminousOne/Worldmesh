@@ -112,7 +112,8 @@ Within a stage, systems run in the order they were registered. Commands and acti
 
 | Method | Does |
 | --- | --- |
-| `send(to, action) -> u64` | Sends an action, delivered on the next tick wherever the target is. Returns its trace. |
+| `send(to, action) -> u64` | Sends an action once: it lands on the next tick wherever the target is, or is lost if the bus drops it. Returns its trace. |
+| `send_reliable(to, action) -> u64` | Sends an action that's sure to land, exactly once: sent again until the target's group confirms it, for up to 5 s. Normally lands on the next tick too. Returns its trace. |
 | `emit(event)` | Shows an event to players who can see this entity, and to its own player |
 | `emit_at(x, y, event)` | Shows an event to players who can see (x, y) |
 | `emit_involving(event, &[ids])` | Like `emit`, plus these players wherever they are |

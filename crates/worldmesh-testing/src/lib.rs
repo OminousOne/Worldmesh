@@ -2,8 +2,9 @@
 //!
 //! A [`TestWorld`] runs real Server Entity Groups and Spatial Layer Cells and passes their
 //! messages between them exactly as the bus would (actions to entities wherever they are,
-//! area actions through the cells, handoffs, spatial query results), but synchronously:
-//! one [`TestWorld::step`] is one tick of the whole world.
+//! area actions through the cells, handoffs, spatial query results, confirmations of sure
+//! deliveries), but synchronously: one [`TestWorld::step`] is one tick of the whole world.
+//! [`TestWorld::lose`] makes it drop some of them, like an overloaded bus.
 //!
 //! ```ignore
 //! let mut w = TestWorld::new(my_world(), 2, 2); // 2 groups, 2 cells
@@ -21,9 +22,10 @@ use std::sync::Arc;
 use serde::Serialize;
 use worldmesh_core::config::{partition, WorldConfig};
 use worldmesh_core::protocol::{
-    Assignment, EntityId, Envelope, GroupCommand, GroupCommandKind, GroupId, Kind, NewEntity,
-    SpatialViews, Viewer, Viewers, WireEvent, SPAWNED_ID_START,
+    AckTo, Acks, Assignment, EntityId, Envelope, GroupCommand, GroupCommandKind, GroupId, Kind,
+    NewEntity, SpatialViews, Viewer, Viewers, WireEvent, SPAWNED_ID_START,
 };
+use worldmesh_core::reliable::{Target, Unconfirmed};
 use worldmesh_core::subjects::{BROADCAST, SPATIAL_ID_BIT};
 use worldmesh_core::views::{from_player, merge_view};
 use worldmesh_core::{codec, time};
@@ -67,6 +69,13 @@ impl Seen {
 /// The one gateway every TestWorld player is connected to.
 const GATEWAY: u32 = 1;
 
+/// Something on the (pretend) bus.
+#[derive(Debug, Clone)]
+enum Msg {
+    Envelope(Envelope),
+    Acks(Acks),
+}
+
 /// A whole world in one process. See the [module docs](self).
 pub struct TestWorld {
     rules: Arc<Rules>,
@@ -74,8 +83,15 @@ pub struct TestWorld {
     tick: u64,
     groups: BTreeMap<GroupId, GroupWorld>,
     cells: BTreeMap<GroupId, SpatialWorld>,
-    /// Envelopes waiting to be delivered before the next tick: (subject, envelope).
-    pending: Vec<(String, Envelope)>,
+    /// Messages waiting to be delivered before the next tick: (subject, message).
+    pending: Vec<(String, Msg)>,
+    /// Players' commands until their group confirms them, as the gateway keeps them.
+    commands: Unconfirmed,
+    /// The % of messages dropped on the way, and how many draws so far (for a fixed sequence).
+    loss: u8,
+    draws: u64,
+    /// Messages dropped so far.
+    dropped: u64,
     next_spawn_id: EntityId,
     /// The game's events from the last step, in the order they happened.
     events: Vec<WireEvent>,
@@ -110,6 +126,7 @@ impl TestWorld {
             group_hosts: 1,
             binary_bus: true,
             group_lag: Vec::new(),
+            fake_loss: 0,
         };
         let groups = group_ids
             .iter()
@@ -134,11 +151,37 @@ impl TestWorld {
             groups,
             cells,
             pending: Vec::new(),
+            commands: Unconfirmed::default(),
+            loss: 0,
+            draws: 0,
+            dropped: 0,
             next_spawn_id: SPAWNED_ID_START,
             events: Vec::new(),
             views: Vec::new(),
             viewers: BTreeSet::new(),
         }
+    }
+
+    /// Drop `pct` % of the messages between processes (envelopes and confirmations), in a
+    /// fixed pseudo-random sequence, like an overloaded bus. Throwaway actions and inputs that
+    /// are dropped are lost; sure ones ([`worldmesh_sim::Me::send_reliable`], players'
+    /// commands, handoffs) are sent again until confirmed.
+    pub fn lose(&mut self, pct: u8) -> &mut Self {
+        self.loss = pct.min(100);
+        self
+    }
+
+    /// Messages dropped so far by [`TestWorld::lose`].
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
+    /// Sure envelopes (actions, commands, handoffs, area actions passed on) still waiting
+    /// for a confirmation, everywhere.
+    pub fn unconfirmed(&self) -> usize {
+        self.commands.len()
+            + self.groups.values().map(|g| g.unconfirmed()).sum::<usize>()
+            + self.cells.values().map(|c| c.unconfirmed()).sum::<usize>()
     }
 
     /// The world's rules (its components, messages and kinds).
@@ -249,8 +292,10 @@ impl TestWorld {
             false,
         );
         env.from.tick = self.tick;
-        self.pending
-            .push((worldmesh_core::subjects::entity_subject(player), env));
+        self.pending.push((
+            worldmesh_core::subjects::entity_subject(player),
+            Msg::Envelope(env),
+        ));
     }
 
     /// A player's command, handled by their entity on the next tick. Panics if `C` isn't
@@ -269,8 +314,13 @@ impl TestWorld {
         let body = codec::to_bytes(&command).expect("the command encodes");
         let mut env = from_player(player, Kind::Command { msg, body }, true);
         env.from.tick = self.tick;
-        self.pending
-            .push((worldmesh_core::subjects::entity_subject(player), env));
+        env.ack = Some(AckTo::Gateway(GATEWAY));
+        self.commands
+            .track(&env, vec![Target::entity(player)], self.tick);
+        self.pending.push((
+            worldmesh_core::subjects::entity_subject(player),
+            Msg::Envelope(env),
+        ));
     }
 
     /// Move an entity to another group, as the orchestrator would: it's handed off live at
@@ -293,22 +343,32 @@ impl TestWorld {
     pub fn step(&mut self) {
         self.tick += 1;
         let tick = self.tick;
-        for (subject, env) in std::mem::take(&mut self.pending) {
-            self.deliver(&subject, env);
+        // The gateway sends again the commands nobody confirmed in time.
+        let copies = self.commands.due(tick).resend;
+        self.pending
+            .extend(copies.into_iter().map(|(s, env)| (s, Msg::Envelope(env))));
+        for (subject, msg) in std::mem::take(&mut self.pending) {
+            self.deliver(&subject, msg);
         }
 
         let mut reports = Vec::new();
-        let mut sent = Vec::new();
+        let mut sent: Vec<(String, Msg)> = Vec::new();
         let mut spawned = Vec::new();
         for (&id, g) in self.groups.iter_mut() {
             g.step(tick);
             reports.extend(g.take_reports(tick));
+            sent.extend(g.take_releases(tick).into_iter().map(|(to, env)| {
+                (
+                    worldmesh_core::subjects::group_inbox_subject(to),
+                    Msg::Envelope(env),
+                )
+            }));
             sent.extend(
-                g.take_releases(tick)
+                g.take_outbox()
                     .into_iter()
-                    .map(|(to, env)| (worldmesh_core::subjects::group_inbox_subject(to), env)),
+                    .map(|(s, env)| (s, Msg::Envelope(env))),
             );
-            sent.extend(g.take_outbox());
+            sent.extend(g.take_acks().into_iter().map(|(s, a)| (s, Msg::Acks(a))));
             spawned.extend(g.take_spawns().into_iter().map(|e| (id, e)));
         }
 
@@ -357,6 +417,14 @@ impl TestWorld {
             answers.extend(c.answer(tick));
             self.views
                 .extend(c.build_views(tick).into_iter().map(|(_, views)| views));
+            // Area actions it passes on again, and its confirmations.
+            c.resend(tick);
+            sent.extend(
+                c.take_outbox()
+                    .into_iter()
+                    .map(|(s, env)| (s, Msg::Envelope(env))),
+            );
+            sent.extend(c.take_acks().into_iter().map(|(s, a)| (s, Msg::Acks(a))));
         }
         for (group, a) in answers {
             if let Some(g) = self.groups.get_mut(&group) {
@@ -391,7 +459,25 @@ impl TestWorld {
         self.run(time::ticks_in(ms));
     }
 
-    fn deliver(&mut self, subject: &str, env: Envelope) {
+    /// Should the next message be dropped ([`TestWorld::lose`])?
+    fn lost(&mut self) -> bool {
+        if self.loss == 0 {
+            return false;
+        }
+        self.draws += 1;
+        let lost = codec::splitmix64(self.draws ^ 0x5eed) % 100 < u64::from(self.loss);
+        self.dropped += u64::from(lost);
+        lost
+    }
+
+    fn deliver(&mut self, subject: &str, msg: Msg) {
+        if self.lost() {
+            return;
+        }
+        let env = match msg {
+            Msg::Envelope(env) => env,
+            Msg::Acks(acks) => return self.deliver_acks(subject, acks),
+        };
         let mut parts = subject.split('.');
         match (parts.next(), parts.next(), parts.next()) {
             (Some("entity"), Some(id), None) => {
@@ -428,9 +514,35 @@ impl TestWorld {
                 else {
                     return;
                 };
-                c.route_area(env);
+                c.route_area(env, self.tick);
                 for (subject, env) in c.take_outbox() {
-                    self.deliver(&subject, env);
+                    self.deliver(&subject, Msg::Envelope(env));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn deliver_acks(&mut self, subject: &str, acks: Acks) {
+        let mut parts = subject.split('.');
+        let (Some(role), Some(id)) = (parts.next(), parts.next().and_then(|p| p.parse().ok()))
+        else {
+            return;
+        };
+        match role {
+            "group" => {
+                if let Some(g) = self.groups.get_mut(&id) {
+                    g.receive_acks(acks);
+                }
+            }
+            "spatial" => {
+                if let Some(c) = self.cells.get_mut(&id) {
+                    c.receive_acks(acks);
+                }
+            }
+            "gateway" if id == GATEWAY => {
+                for key in acks.envelopes {
+                    self.commands.confirm(acks.by, key);
                 }
             }
             _ => {}
@@ -635,6 +747,83 @@ mod tests {
         w.step();
         assert!(w.entity(bob).is_none());
         assert_eq!(w.view(alice).len(), 1);
+    }
+
+    fn lines(w: &TestWorld, id: EntityId, prefix: &str) -> usize {
+        w.entity(id)
+            .unwrap()
+            .get::<Log>()
+            .unwrap()
+            .0
+            .iter()
+            .filter(|l| l.starts_with(prefix))
+            .count()
+    }
+
+    #[test]
+    fn on_a_lossy_bus_sure_actions_land_exactly_once_and_throwaway_ones_sometimes_dont() {
+        let (mut w, alice, bob) = two_players();
+        w.lose(30);
+        for _ in 0..40 {
+            w.command(alice, Command::Hit { target: bob }); // sure command, sure action
+            w.command(alice, Command::Poke { target: bob }); // sure command, throwaway action
+            w.step();
+        }
+        for _ in 0..5 {
+            w.command(
+                alice,
+                Command::Blast {
+                    x: 10.5,
+                    y: 10.5,
+                    r: 2.0,
+                },
+            );
+            w.command(alice, Command::Shout);
+            w.step();
+        }
+        assert!(
+            w.run_until(200, |w| w.unconfirmed() == 0),
+            "everything confirmed"
+        );
+        assert!(w.dropped() > 100, "the bus really was lossy");
+        assert_eq!(lines(&w, bob, "dmg 10 "), 40, "every hit, once");
+        assert_eq!(lines(&w, bob, "dmg 5 "), 5, "every blast, once");
+        assert_eq!(
+            w.entity(bob)
+                .unwrap()
+                .get::<Log>()
+                .unwrap()
+                .0
+                .iter()
+                .filter(|l| l.ends_with(" all"))
+                .count(),
+            5,
+            "every shout, once"
+        );
+        let pokes = lines(&w, bob, "dmg 1 ") - 5; // shouts do 1 damage too
+        assert!(
+            (10..40).contains(&pokes),
+            "about 30% of pokes lost: {pokes} of 40 landed"
+        );
+    }
+
+    #[test]
+    fn on_a_lossy_bus_handoffs_never_lose_or_copy_an_entity() {
+        let (mut w, alice, bob) = two_players();
+        w.lose(30);
+        // Bob changes groups every second (far more often than scaling would move anyone),
+        // and is hit every 2 ticks.
+        for i in 0..20 {
+            w.hand_off(bob, if i % 2 == 0 { 1 } else { 2 });
+            for _ in 0..5 {
+                w.command(alice, Command::Hit { target: bob });
+                w.run(2);
+            }
+        }
+        assert!(w.run_until(200, |w| w.unconfirmed() == 0));
+        let copies = w.entities().iter().filter(|(_, e)| e.id == bob).count();
+        assert_eq!(copies, 1, "bob exists exactly once");
+        assert_eq!(lines(&w, bob, "dmg 10 "), 100, "and got every hit once");
     }
 
     #[test]

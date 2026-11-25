@@ -1,8 +1,8 @@
 //! Everything that goes over the bus passes through here: encoding (JSON or compact binary,
 //! switchable at runtime from the debug panel), per-kind traffic counters for the metrics
-//! graphs, and rate-limited warnings when a message can't be sent.
+//! graphs, rate-limited warnings when a message can't be sent, and fake loss (debug).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering::Relaxed};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -26,6 +26,25 @@ pub fn binary() -> bool {
     BINARY.load(Relaxed)
 }
 
+/// Fake loss (debug): the % of envelopes and confirmations dropped as they arrive. Set from
+/// every assignment, so the whole world loses messages together.
+static FAKE_LOSS: AtomicU8 = AtomicU8::new(0);
+static LOSS_DRAWS: AtomicU64 = AtomicU64::new(0);
+
+pub fn set_fake_loss(pct: u8) {
+    FAKE_LOSS.store(pct.min(100), Relaxed);
+}
+
+/// Should this message (just arrived on `subject`) be dropped, to fake a lossy bus?
+fn fake_lost(subject: &str) -> bool {
+    let pct = FAKE_LOSS.load(Relaxed);
+    if pct == 0 || MsgKind::of(subject) != MsgKind::Envelopes {
+        return false;
+    }
+    let draw = LOSS_DRAWS.fetch_add(1, Relaxed) ^ (u64::from(std::process::id()) << 32);
+    crate::codec::splitmix64(draw) % 100 < u64::from(pct)
+}
+
 /// What a message is, from its subject, for the "bus traffic by kind" graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MsgKind {
@@ -33,7 +52,8 @@ pub enum MsgKind {
     Reports,
     /// Spatial Layer Cell -> group: answers to bots' questions.
     Senses,
-    /// Envelopes between entities, groups and cells: inputs, requests, effects, handoffs.
+    /// Envelopes between entities, groups and cells (inputs, commands, actions, handoffs), and
+    /// confirmations of the sure ones.
     Envelopes,
     /// Spatial Layer Cell -> gateway: what each player sees. Gateway -> cells: where players are.
     Views,
@@ -69,7 +89,10 @@ impl MsgKind {
             MsgKind::Reports
         } else if subject.ends_with(".senses") {
             MsgKind::Senses
-        } else if subject.ends_with(".inbox") || subject.starts_with("entity.") {
+        } else if subject.ends_with(".inbox")
+            || subject.ends_with(".acks")
+            || subject.starts_with("entity.")
+        {
             MsgKind::Envelopes
         } else if subject == crate::subjects::VIEWERS
             || (subject.starts_with("gateway.") && subject.ends_with(".views"))
@@ -187,6 +210,9 @@ where
             };
             let Some(msg) = msg else { break };
             stats::BUS_IN.add(msg.payload.len());
+            if fake_lost(&subject) {
+                continue;
+            }
             match decode::<T>(&msg.payload) {
                 Ok(value) => {
                     if tx.send(wrap(value)).is_err() {
@@ -276,6 +302,8 @@ mod tests {
                     sub: 2,
                     input: bytes.clone(),
                 },
+                ack: None,
+                resends: 0,
             },
             Envelope {
                 to: Address::Area {
@@ -292,6 +320,8 @@ mod tests {
                     msg: 3,
                     body: bytes.clone(),
                 },
+                ack: Some(AckTo::Spatial(0x8001)),
+                resends: 2,
             },
             Envelope {
                 to: Address::Group { id: 4 },
@@ -303,6 +333,8 @@ mod tests {
                 kind: Kind::Handoff {
                     entity: bytes.clone(),
                 },
+                ack: Some(AckTo::Group(3)),
+                resends: 0,
             },
             Envelope {
                 to: Address::Everyone,
@@ -315,6 +347,8 @@ mod tests {
                     msg: 1,
                     body: bytes.clone(),
                 },
+                ack: Some(AckTo::Gateway(0xdead_beef)),
+                resends: 1,
             },
         ];
         for env in &envelopes {
@@ -418,7 +452,13 @@ mod tests {
             version: 3,
             binary_bus: true,
             group_lag: vec![(3, 200)],
+            fake_loss: 30,
             ..Default::default()
+        });
+        round_trip(&Acks {
+            by: 0x8001,
+            envelopes: vec![(5, 1), (5, 2)],
+            handoffs: vec![(9, 1000)],
         });
         round_trip(&Heartbeat {
             role: "group".into(),
@@ -439,6 +479,12 @@ mod tests {
         assert_eq!(MsgKind::of(&group_inbox_subject(3)), MsgKind::Envelopes);
         assert_eq!(MsgKind::of(BROADCAST), MsgKind::Envelopes);
         assert_eq!(MsgKind::of(&entity_subject(3)), MsgKind::Envelopes);
+        assert_eq!(MsgKind::of(&group_acks_subject(3)), MsgKind::Envelopes);
+        assert_eq!(
+            MsgKind::of(&spatial_acks_subject(0x8001)),
+            MsgKind::Envelopes
+        );
+        assert_eq!(MsgKind::of(&gateway_acks_subject(77)), MsgKind::Envelopes);
         assert_eq!(MsgKind::of(VIEWERS), MsgKind::Views);
         assert_eq!(MsgKind::of(&gateway_views_subject(77)), MsgKind::Views);
         assert_eq!(MsgKind::of(&gateway_ids_subject(77)), MsgKind::Control);

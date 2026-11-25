@@ -37,7 +37,7 @@ impl Plugin for TagGame {
             .visible::<It>()                          // players can see who's it
             .command(|me, tag: &Tag| {
                 if me.get::<It>() == Some(&It(true)) {
-                    me.send(To::Entity(tag.target), YouAreIt); // wherever the target is
+                    me.send_reliable(To::Entity(tag.target), YouAreIt); // sure to land, wherever the target is
                 }
             })
             .action(|me, _: &YouAreIt, from| { /* in reach of `from`? then me.insert(It(true)) */ })

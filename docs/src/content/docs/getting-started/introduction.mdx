@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Game code always runs as one entity, through `Me`. It changes only that entity, and reaches the rest of the world with `me.send(...)`, `me.query(...)`, `me.nearby(...)`, `me.spawn(...)` and `me.emit(...)`. [Plugins, components and messages](/Worldmesh/concepts/plugins-and-components/) explains the model; the [World reference](/Worldmesh/reference/world/) lists every call.
+Game code always runs as one entity, through `Me`. It changes only that entity, and reaches the rest of the world with `me.send(...)`, `me.send_reliable(...)`, `me.query(...)`, `me.nearby(...)`, `me.spawn(...)` and `me.emit(...)`. [Plugins, components and messages](/Worldmesh/concepts/plugins-and-components/) explains the model; the [World reference](/Worldmesh/reference/world/) lists every call.
 
 ## What's in the repository
 

@@ -46,6 +46,7 @@ export const CSS = `
 .wm-debug .wm-group-legend .lag { color: #e8b04a; font-weight: 600; }
 .wm-lag-group { max-width: 112px; }
 .wm-lag-ms { width: 48px; }
+.wm-loss-pct { width: 40px; }
 .wm-debug .legend .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .wm-debug .legend .swatch.square { border-radius: 2px; }
 .wm-debug .legend .muted { margin-left: auto; }

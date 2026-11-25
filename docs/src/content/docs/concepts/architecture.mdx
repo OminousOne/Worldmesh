@@ -68,7 +68,7 @@ A slow process only delays its own part: cells wait at most 40 ms for reports, a
 
 Everything goes over NATS as MessagePack. JSON can be switched on live, for reading the traffic. NATS can be one server or a cluster of as many as you need: [Scaling the bus](/Worldmesh/guides/deployment/#scaling-the-bus) shows how.
 
-Each entity has its own subject, so nobody needs to know which group simulates it. A group subscribes to exactly the entities it holds, plus, for a second after a handoff, the ones it just gave away, so it can forward anything that still arrives for them.
+Each entity has its own subject, so nobody needs to know which group simulates it. A group subscribes to exactly the entities it holds, plus, for a second after a handoff, the ones it just gave away, so it can forward anything that still arrives for them. Sure deliveries are confirmed on each sender's `.acks` subject ([Sure to land](/Worldmesh/concepts/entities-and-actions/#sure-to-land)).
 
 | Subject | From, to | Carries |
 | --- | --- | --- |
@@ -78,6 +78,7 @@ Each entity has its own subject, so nobody needs to know which group simulates i
 | `group.<id>.senses` | Cells to one group | Spatial query results |
 | `spatial.<id>.reports` | Groups to one cell | Each tick's report |
 | `spatial.<id>.inbox` | Groups to one cell | Actions aimed at an area |
+| `group.<id>.acks`, `spatial.<id>.acks`, `gateway.<id>.acks` | Receivers to one sender | Confirmations: the sure actions, commands and handoffs it sent arrived |
 | `spatial.viewers` | Gateways to cells | Where each gateway's players are looking |
 | `gateway.<id>.views` | Cells to one gateway | Its players' views |
 | `gateway.<id>.ids` | Orchestrator to one gateway | Player ids for it to give out |

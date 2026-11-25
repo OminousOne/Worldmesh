@@ -38,7 +38,7 @@ When game code emits an event (`me.emit`, `me.emit_at`), the group reports it to
 
 ### Area actions
 
-An action sent to a circle, like an explosion (`me.send(To::Area { x, y, r }, Hit)`), goes to the cells covering that circle. Each passes it on to every group with an entity inside it, and those groups deliver it on the next tick. The sender doesn't need to know who's there, or where they're simulated.
+An action sent to a circle, like an explosion (`me.send_reliable(To::Area { x, y, r }, Hit)`), goes to the cells covering that circle. Each passes it on to every group with an entity inside it, and those groups deliver it on the next tick. The sender doesn't need to know who's there, or where they're simulated. A sure one is confirmed at each hop: each cell confirms it to the sender, and each group to the cell, so a copy lost on either hop is sent again.
 
 ### Spatial queries
 

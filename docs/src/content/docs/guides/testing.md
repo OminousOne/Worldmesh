@@ -46,6 +46,7 @@ fn a_sword_hit_lands_on_the_next_tick_in_another_group() {
 | `hand_off(id, group)` | Moves an entity to another group, at the end of the next step |
 | `step()`, `run(n)`, `run_ms(ms)` | Runs one tick, `n` ticks, or about `ms` of world time |
 | `run_until(max, \|w\| ...)` | Runs until a condition holds. False if it didn't within `max` ticks. |
+| `lose(pct)` | Drops `pct` % of the messages between processes from now on, in a fixed sequence, like an overloaded bus |
 
 Entities your game spawns with `me.spawn` get ids from 2³¹ up and stay in the group that spawned them.
 
@@ -62,12 +63,15 @@ Entities your game spawns with `me.spawn` get ids from 2³¹ up and stay in the 
 | `events_seen::<E>(player)` | The events of type `E` that player got |
 | `rules()` | The built world: its schema, and `command_from_json` to check what a client sends |
 | `tick()` | The last tick simulated |
+| `unconfirmed()` | Sure envelopes (actions, commands, handoffs) still waiting for a confirmation, everywhere |
+| `dropped()` | Messages dropped so far by `lose` |
 
 ## What to test
 
 - **Both sides of every check**: in reach and out of reach, in sight and blocked, cooldown ready and not.
 - **Across groups**: put the two entities in different groups with `join_in` or `spawn_in`. It should make no difference, and now you know it doesn't.
-- **During a handoff**: `hand_off` the target in the same step you send it something. It should land exactly once.
+- **During a handoff**: `hand_off` the target in the same step you send it something. A `send_reliable` should land exactly once.
+- **On a lossy bus**: `w.lose(30)` drops 30% of the messages between processes. Every `send_reliable` should still land exactly once (run until `w.unconfirmed() == 0`), while some `send`s go missing. Code that must work either way shouldn't care.
 - **What players see**: `view` and `events_seen` catch a component you forgot to make visible (or one you didn't mean to), and an event placed where nobody can see it.
 - **The client's JSON**: `w.rules().command_from_json("use", json)` proves the gateway reads what your client sends, under the name it sends it.
 

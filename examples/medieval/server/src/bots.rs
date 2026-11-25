@@ -102,7 +102,7 @@ impl Plugin for Bots {
             .component::<Brain>()
             .command(move |me, s: &SpawnBots| spawn_bots(&spawn_map, me, s))
             .command(|me, _: &ClearBots| {
-                me.send(To::Everyone, Vanish);
+                me.send_reliable(To::Everyone, Vanish);
             })
             .action(|me, _: &Vanish, _| {
                 if me.has::<Brain>() {

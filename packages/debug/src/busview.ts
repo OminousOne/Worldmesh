@@ -4,7 +4,8 @@
 //
 // Server Entity Groups are circles on the left, in their group colour; Spatial Layer Cells are
 // squares on the right. Exact, per envelope: handoffs, players' inputs and commands, actions,
-// area actions (group -> Spatial Layer Cell -> groups with someone in the circle), forwards.
+// area actions (group -> Spatial Layer Cell -> groups with someone in the circle), forwards,
+// and copies of sure envelopes sent again because no confirmation came back in time.
 // Every-tick streams, with their real senders, receivers and sizes but sampled: groups' reports
 // to Spatial Layer Cells, spatial query results, players' views, and where players look.
 //
@@ -23,7 +24,7 @@ export type TraceNote = {
   result?: { text: string; landed: boolean };
 };
 
-type Kind = 'handoff' | 'action' | 'senses' | 'forward' | 'player' | 'report' | 'view' | 'control';
+type Kind = 'handoff' | 'action' | 'senses' | 'forward' | 'player' | 'resend' | 'report' | 'view' | 'control';
 
 // Validated categorical slots (dark mode) for envelopes; greys for the background streams.
 const KINDS: { kind: Kind; name: string; color: string }[] = [
@@ -32,12 +33,13 @@ const KINDS: { kind: Kind; name: string; color: string }[] = [
   { kind: 'senses', name: 'Spatial query results', color: '#199e70' },
   { kind: 'forward', name: 'Forwarded', color: '#c98500' },
   { kind: 'player', name: 'Player input or command', color: '#d55181' },
+  { kind: 'resend', name: 'Sent again (not confirmed in time)', color: '#0ca30c' },
   { kind: 'report', name: 'Group report', color: '#898781' },
   { kind: 'view', name: 'Views, viewers', color: '#6b6a65' },
   { kind: 'control', name: 'Heartbeat, assignment', color: '#4a4945' },
 ];
 const COLOR = Object.fromEntries(KINDS.map((k) => [k.kind, k.color])) as Record<Kind, string>;
-const BIG: ReadonlySet<Kind> = new Set(['handoff', 'action', 'senses', 'forward', 'player']);
+const BIG: ReadonlySet<Kind> = new Set(['handoff', 'action', 'senses', 'forward', 'player', 'resend']);
 const INK = { primary: '#f0efec', secondary: '#c3c2b7', muted: '#898781', spoke: '#2c2c2a', surface: '#16191e', node: '#23272e' };
 
 /** One leg takes this long on screen; a message is two legs (to NATS, then out). */
@@ -218,10 +220,12 @@ export class BusView {
         const cells = uniq(t.hops.filter((h) => h.kind === 'area' && isSpatial(h.to)).map((h) => h.to));
         const reached = uniq(t.hops.filter((h) => h.kind === 'area' && isSpatial(h.from)).map((h) => h.to));
         const forwards = t.hops.filter((h) => h.kind === 'forward').map((h) => name(h.to));
+        const resent = t.hops.filter((h) => h.kind === 'resend').length;
         let route = (requested ? 'Gateway → ' : '') + name(start.group);
         if (direct.length) route += ` → ${direct.map(name).join(', ')}`;
         if (cells.length) route += ` → ${cells.map(name).join(', ')} → ${reached.length ? reached.map(name).join(', ') : 'nobody there'}`;
         if (forwards.length) route += `, forwarded to ${forwards.join(', ')}`;
+        if (resent) route += `, sent again ${resent}×`;
         const results = t.results;
         const outcome = !results.length
           ? (cells.length && !reached.length ? 'no one there' : '…')
@@ -403,6 +407,7 @@ export class BusView {
         lines.push(`${s.players} entities held (copies) · ${s.viewers} players watching`);
         lines.push(`${s.queries.toFixed(1)} questions/s answered · ${s.views.toFixed(1)} views/s · ${s.areas.toFixed(1)} area actions/s`);
       }
+      if (s.resent || s.lost) lines.push(`sure deliveries: ${(s.resent ?? 0).toFixed(1)}/s sent again, ${(s.lost ?? 0).toFixed(1)}/s given up`);
     } else if (best === NATS) {
       lines.push('no monitoring data');
     }
