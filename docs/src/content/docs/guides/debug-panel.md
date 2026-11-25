@@ -32,7 +32,7 @@ The scaling and lag controls only work when the gateway runs with `--allow-debug
 | Metrics | CPU, memory, traffic and load per process over the last minute, and sure deliveries sent again or given up |
 | Bus traffic | Every process around NATS, messages moving between them (copies sent again in their own colour), recent actions traced hop by hop |
 
-**Fake loss** makes every process drop that share of the envelopes and confirmations it receives, like an overloaded bus. Try 30%: `me.send_reliable` actions, commands and handoffs still land, some a little late, and the "Sure deliveries" chart shows the copies sent again. `me.send` actions and inputs go missing: your unit may keep walking after you let go, until your next input.
+**Fake loss** makes every process drop that share of the envelopes and confirmations it receives, like an overloaded bus. Try 30%: `me.send` actions go missing, while `me.send_reliable` actions, commands, inputs and handoffs still land, some a little late, and the "Sure deliveries" chart shows the copies sent again. A late input means your unit stops or turns a moment late, and your prediction gets corrected.
 
 With several gateways, the panel adds up their numbers and draws them as one in the bus view.
 

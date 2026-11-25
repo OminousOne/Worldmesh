@@ -85,8 +85,9 @@ pub struct TestWorld {
     cells: BTreeMap<GroupId, SpatialWorld>,
     /// Messages waiting to be delivered before the next tick: (subject, message).
     pending: Vec<(String, Msg)>,
-    /// Players' commands until their group confirms them, as the gateway keeps them.
-    commands: Unconfirmed,
+    /// Players' commands, and each player's latest input, until their group confirms them,
+    /// as the gateway keeps them.
+    sure: Unconfirmed,
     /// The % of messages dropped on the way, and how many draws so far (for a fixed sequence).
     loss: u8,
     draws: u64,
@@ -151,7 +152,7 @@ impl TestWorld {
             groups,
             cells,
             pending: Vec::new(),
-            commands: Unconfirmed::default(),
+            sure: Unconfirmed::default(),
             loss: 0,
             draws: 0,
             dropped: 0,
@@ -163,9 +164,9 @@ impl TestWorld {
     }
 
     /// Drop `pct` % of the messages between processes (envelopes and confirmations), in a
-    /// fixed pseudo-random sequence, like an overloaded bus. Throwaway actions and inputs that
-    /// are dropped are lost; sure ones ([`worldmesh_sim::Me::send_reliable`], players'
-    /// commands, handoffs) are sent again until confirmed.
+    /// fixed pseudo-random sequence, like an overloaded bus. Throwaway actions that are dropped
+    /// are lost; sure ones ([`worldmesh_sim::Me::send_reliable`], players' commands and latest
+    /// inputs, handoffs) are sent again until confirmed.
     pub fn lose(&mut self, pct: u8) -> &mut Self {
         self.loss = pct.min(100);
         self
@@ -176,10 +177,10 @@ impl TestWorld {
         self.dropped
     }
 
-    /// Sure envelopes (actions, commands, handoffs, area actions passed on) still waiting
-    /// for a confirmation, everywhere.
+    /// Sure envelopes (actions, commands, latest inputs, handoffs, area actions passed on)
+    /// still waiting for a confirmation, everywhere.
     pub fn unconfirmed(&self) -> usize {
-        self.commands.len()
+        self.sure.len()
             + self.groups.values().map(|g| g.unconfirmed()).sum::<usize>()
             + self.cells.values().map(|c| c.unconfirmed()).sum::<usize>()
     }
@@ -292,6 +293,12 @@ impl TestWorld {
             false,
         );
         env.from.tick = self.tick;
+        // As the gateway does: sure, and replacing any earlier input still unconfirmed.
+        env.ack = Some(AckTo::Gateway(GATEWAY));
+        self.sure
+            .retain(|e| !(e.to == env.to && matches!(e.kind, Kind::Input { .. })));
+        self.sure
+            .track(&env, vec![Target::entity(player)], self.tick);
         self.pending.push((
             worldmesh_core::subjects::entity_subject(player),
             Msg::Envelope(env),
@@ -315,7 +322,7 @@ impl TestWorld {
         let mut env = from_player(player, Kind::Command { msg, body }, true);
         env.from.tick = self.tick;
         env.ack = Some(AckTo::Gateway(GATEWAY));
-        self.commands
+        self.sure
             .track(&env, vec![Target::entity(player)], self.tick);
         self.pending.push((
             worldmesh_core::subjects::entity_subject(player),
@@ -343,8 +350,8 @@ impl TestWorld {
     pub fn step(&mut self) {
         self.tick += 1;
         let tick = self.tick;
-        // The gateway sends again the commands nobody confirmed in time.
-        let copies = self.commands.due(tick).resend;
+        // The gateway sends again the commands and inputs nobody confirmed in time.
+        let copies = self.sure.due(tick).resend;
         self.pending
             .extend(copies.into_iter().map(|(s, env)| (s, Msg::Envelope(env))));
         for (subject, msg) in std::mem::take(&mut self.pending) {
@@ -542,7 +549,7 @@ impl TestWorld {
             }
             "gateway" if id == GATEWAY => {
                 for key in acks.envelopes {
-                    self.commands.confirm(acks.by, key);
+                    self.sure.confirm(acks.by, key);
                 }
             }
             _ => {}
@@ -805,6 +812,32 @@ mod tests {
             (10..40).contains(&pokes),
             "about 30% of pokes lost: {pokes} of 40 landed"
         );
+    }
+
+    #[test]
+    fn on_a_lossy_bus_a_player_who_stops_stops() {
+        let (mut w, alice, _) = two_players();
+        w.lose(30);
+        for round in 0..40 {
+            let dx = if round % 2 == 0 { 1.0 } else { -1.0 };
+            w.input(alice, 0, Input { dx, dy: 0.0 });
+            w.run(3);
+            w.input(alice, 0, Input { dx: 0.0, dy: 0.0 });
+            w.run(30); // long enough for the stop to be sent again, if it was dropped
+            let x = w.entity(alice).unwrap().x;
+            w.run(10);
+            assert_eq!(
+                w.entity(alice).unwrap().x,
+                x,
+                "still walking after round {round}"
+            );
+        }
+        assert!(
+            w.dropped() > 5,
+            "the bus really was lossy: {} dropped",
+            w.dropped()
+        );
+        assert!(w.run_until(100, |w| w.unconfirmed() == 0));
     }
 
     #[test]

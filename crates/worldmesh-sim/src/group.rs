@@ -299,6 +299,7 @@ impl GroupWorld {
                     if self.entities.contains_key(&id) {
                         let input = input.clone();
                         self.schedule_input(id, at_tick, sub, env.seq, input);
+                        self.confirm(&env);
                     } else {
                         self.forward(id, env);
                     }
@@ -321,8 +322,16 @@ impl GroupWorld {
     }
 
     /// Takes effect at that sub-step of `at_tick`, or at the start of the next tick if that
-    /// tick has already been simulated. Of two inputs for the same moment, the later-sent wins.
+    /// tick has already been simulated. Of two inputs for the same moment, the later-sent wins,
+    /// and one sent before an input already applied is dropped: it would undo a newer one.
     fn schedule_input(&mut self, id: EntityId, at_tick: u64, sub: u8, seq: u64, input: Vec<u8>) {
+        if self
+            .entities
+            .get(&id)
+            .is_some_and(|r| seq <= r.meta.input_seq)
+        {
+            return;
+        }
         let key = (
             at_tick,
             sub.min(self.config.input_substeps.saturating_sub(1)),
@@ -387,6 +396,12 @@ impl GroupWorld {
         for (&id, inputs) in self.schedule.iter_mut() {
             let later = inputs.split_off(&(tick + 1, 0));
             let now = std::mem::replace(inputs, later);
+            if let (Some(newest), Some(r)) = (
+                now.values().map(|(seq, _)| *seq).max(),
+                self.entities.get_mut(&id),
+            ) {
+                r.meta.input_seq = r.meta.input_seq.max(newest);
+            }
             let list: Due = now
                 .into_iter()
                 .map(|((at, sub), (_, bytes))| (if at < tick { 0 } else { sub }, bytes))

@@ -144,6 +144,10 @@ pub(crate) struct Meta {
     /// A player's inputs not simulated yet: (tick, sub-step, sequence number, input). Only the
     /// owning group hears a player's inputs, so they travel with the entity on a handoff.
     pub pending: Vec<(u64, u8, u64, serde_bytes::ByteBuf)>,
+    /// The number of the newest input already applied: an older one arriving late (sent again,
+    /// or forwarded) never undoes it.
+    #[serde(default)]
+    pub input_seq: u64,
 }
 
 /// An entity and its bookkeeping, as simulated by a group.

@@ -30,7 +30,8 @@ The gateway applies each input when it says, if it arrives in time:
 - An input too late for its moment is applied as soon as possible: sub-step 0 of the next tick.
 - An input more than 5 seconds ahead is pulled in.
 - An input for tick 0 means "as soon as possible".
-- An input is sent once. If the bus drops it, the previous one stays in force until the next arrives, and the player's prediction is corrected to match the server.
+- The latest input is sure to arrive: the gateway sends it again until the player's group confirms it, unless a newer one replaces it first. A copy that arrives late takes effect late, and the player's prediction is corrected to match.
+- An input sent before one the group already applied is ignored, so a late copy never undoes a newer input.
 
 ## Prediction
 

@@ -289,7 +289,7 @@ pub struct ProcessStats {
     /// Entities handed off per second.
     #[serde(default)]
     pub handoffs: f32,
-    /// Sure deliveries (actions, commands, handoffs) sent again per second because no
+    /// Sure deliveries (actions, commands, inputs, handoffs) sent again per second because no
     /// confirmation came back in time, and given up on (never confirmed) per second.
     #[serde(default)]
     pub resent: f32,

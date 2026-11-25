@@ -63,7 +63,7 @@ Entities your game spawns with `me.spawn` get ids from 2³¹ up and stay in the 
 | `events_seen::<E>(player)` | The events of type `E` that player got |
 | `rules()` | The built world: its schema, and `command_from_json` to check what a client sends |
 | `tick()` | The last tick simulated |
-| `unconfirmed()` | Sure envelopes (actions, commands, handoffs) still waiting for a confirmation, everywhere |
+| `unconfirmed()` | Sure envelopes (actions, commands, latest inputs, handoffs) still waiting for a confirmation, everywhere |
 | `dropped()` | Messages dropped so far by `lose` |
 
 ## What to test

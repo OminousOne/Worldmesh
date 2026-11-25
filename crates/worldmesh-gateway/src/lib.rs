@@ -3,8 +3,9 @@
 //! - A player's inputs and commands go to their entity (`entity.<id>`): the bus delivers them
 //!   to whichever Server Entity Group simulates it, wherever that is. They arrive as JSON, are
 //!   checked against the world's input and command types, and travel on as MessagePack.
-//!   Inputs are sent once (a late input is worse than none); commands are sure to arrive:
-//!   the gateway sends each again until the player's group confirms it.
+//!   Both are sure to arrive: the gateway sends each command again until the player's group
+//!   confirms it, and does the same for each player's latest input (a newer one replaces it:
+//!   only the input in force matters, and the group ignores one older than what it applied).
 //! - Every tick it tells the Spatial Layer Cells where each player is looking, and puts each
 //!   player's snapshot together from what those cells send back. A player's view can cover the
 //!   areas of several cells; the gateway merges their parts.
@@ -171,8 +172,8 @@ struct AppState {
     /// Latest encoded assignment, sent to players as they connect.
     ownership: Arc<Mutex<Option<Bytes>>>,
     clients: Arc<Mutex<BTreeMap<EntityId, Client>>>,
-    /// Players' commands, until their group confirms them.
-    commands: Arc<Mutex<Unconfirmed>>,
+    /// Players' commands, and each player's latest input, until their group confirms them.
+    sure: Arc<Mutex<Unconfirmed>>,
 }
 
 /// A gateway process.
@@ -479,31 +480,32 @@ pub async fn run(
         });
     }
 
-    // Commands: confirmations from groups, and copies of what they haven't confirmed in time.
-    let commands: Arc<Mutex<Unconfirmed>> = Arc::default();
+    // Commands and latest inputs: confirmations from groups, and copies of what they haven't
+    // confirmed in time.
+    let sure: Arc<Mutex<Unconfirmed>> = Arc::default();
     {
-        let (commands, nats) = (commands.clone(), nats.clone());
+        let (sure, nats) = (sure.clone(), nats.clone());
         let mut acks = bus::subscribe::<Acks>(&nats, &gateway_acks_subject(gateway_id)).await?;
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     Some(a) = acks.recv() => {
-                        let mut commands = commands.lock().unwrap();
+                        let mut sure = sure.lock().unwrap();
                         for key in a.envelopes {
-                            commands.confirm(a.by, key);
+                            sure.confirm(a.by, key);
                         }
                     }
                     _ = tokio::time::sleep(time::until_next_tick()) => {
                         let due = {
-                            let mut commands = commands.lock().unwrap();
-                            let due = commands.due(time::current_tick());
-                            let (resent, lost) = commands.take_counts();
+                            let mut sure = sure.lock().unwrap();
+                            let due = sure.due(time::current_tick());
+                            let (resent, lost) = sure.take_counts();
                             stats::RESENT.fetch_add(resent, Ordering::Relaxed);
                             stats::LOST.fetch_add(lost, Ordering::Relaxed);
                             due
                         };
                         for env in &due.lost {
-                            warn!(player = env.from.id, "a command was never confirmed by the player's group");
+                            warn!(player = env.from.id, "a command or input was never confirmed by the player's group");
                         }
                         for (subject, env) in due.resend {
                             bus::publish(&nats, subject, &env).await;
@@ -524,7 +526,7 @@ pub async fn run(
         ids,
         ownership,
         clients,
-        commands,
+        sure,
     };
 
     let app = Router::new()
@@ -709,9 +711,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     }
 
     state.clients.lock().unwrap().remove(&id);
-    // Their entity is about to go: nobody will confirm their commands.
+    // Their entity is about to go: nobody will confirm their commands or input.
     state
-        .commands
+        .sure
         .lock()
         .unwrap()
         .retain(|env| env.to != Address::Entity { id });
@@ -784,7 +786,7 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
             let sub = sub.min(substeps - 1);
             let now_ms = time::world_ms();
             let (at_tick, at_sub) = schedule_input(tick, sub, now_ms / time::tick_ms());
-            let env = from_player(
+            let mut env = from_player(
                 id,
                 Kind::Input {
                     at_tick,
@@ -793,6 +795,13 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
                 },
                 false,
             );
+            // Sure, but only the latest: it replaces any earlier input still unconfirmed.
+            env.ack = Some(AckTo::Gateway(state.gateway));
+            {
+                let mut sure = state.sure.lock().unwrap();
+                sure.retain(|e| !(e.to == env.to && matches!(e.kind, Kind::Input { .. })));
+                sure.track(&env, vec![Target::entity(id)], time::current_tick());
+            }
             bus::publish(&state.nats, entity_subject(id), &env).await;
             // Tick 0 ("as soon as possible") has no moment to be early for.
             let early = if tick == 0 {
@@ -818,11 +827,11 @@ async fn handle_client_msg(state: &AppState, id: EntityId, raw: &[u8]) -> Option
             };
             let mut env = from_player(id, Kind::Command { msg, body }, true);
             env.ack = Some(AckTo::Gateway(state.gateway));
-            state.commands.lock().unwrap().track(
-                &env,
-                vec![Target::entity(id)],
-                time::current_tick(),
-            );
+            state
+                .sure
+                .lock()
+                .unwrap()
+                .track(&env, vec![Target::entity(id)], time::current_tick());
             bus::publish(&state.nats, entity_subject(id), &env).await;
             None
         }

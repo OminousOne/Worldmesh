@@ -65,13 +65,13 @@ NATS delivers each message at most once, and drops messages when a process can't
 - **Late copies land late.** Actions from one sender can then land out of order. Each still says when it was sent (`from.tick`), so judge it by that, as below.
 - **Area and everyone actions** are confirmed hop by hop: the sender's group waits for each Spatial Layer Cell, and each cell waits for every group it passed the action to. So it reaches everyone in the circle, as the cells see it.
 
-Some things are always sure, and one never is:
+Some things are always sure:
 
 | Message | Delivery |
 | --- | --- |
 | Players' commands | Sure: the gateway keeps each one until the player's group confirms it |
 | Handoffs | Sure: the old group keeps the entity until the new group confirms it arrived |
-| Players' inputs | Sent once. An input arriving late is worse than none, but a dropped one leaves the previous input in force until the next |
+| Players' inputs | Sure, but only the latest: a newer input replaces one still unconfirmed, and the group ignores an input older than one it already applied |
 
 :::note
 Sure means sure while the processes stay up. If a group's process crashes, the sure actions it was still waiting on die with it, along with its entities ([issue #8](https://github.com/OminousOne/Worldmesh/issues/8)).

@@ -285,7 +285,7 @@ export class DebugPanel {
     muted('bus-rate');
     const lossRow = make('div', r, 'row', 'Fake loss ');
     lossRow.title =
-      'Every process drops this % of the envelopes and confirmations it receives, like an overloaded bus. Throwaway sends and inputs are lost; sure ones are sent again until confirmed. 0 turns it off';
+      'Every process drops this % of the envelopes and confirmations it receives, like an overloaded bus. me.send actions are lost; sure ones (send_reliable, commands, inputs, handoffs) are sent again until confirmed. 0 turns it off';
     const loss = make('input', lossRow, 'wm-loss-pct');
     Object.assign(loss, { type: 'number', min: '0', max: '90', step: '5', value: '0' });
     lossRow.append(' % ');

@@ -216,6 +216,49 @@ fn input_the_game_cant_read_is_dropped() {
     assert_eq!(x(&w, 1), 10.0);
 }
 
+#[test]
+fn an_input_sent_before_one_already_applied_is_ignored() {
+    let mut w = world(1);
+    spawn_at(&mut w, 1, 10.0, 10.0, true);
+    w.receive(input(1, 2, 1.0, 0.0, 1001, 0));
+    w.step(1001);
+    assert_eq!(x(&w, 1), 11.0);
+    // An older input arrives late (sent again, or forwarded): it would undo the newer one.
+    w.receive(input(1, 1, -1.0, 0.0, 1001, 0));
+    w.step(1002);
+    assert_eq!(x(&w, 1), 12.0, "still walking east");
+}
+
+#[test]
+fn inputs_are_confirmed_to_the_gateway_copies_too() {
+    let mut w = world(1);
+    spawn_at(&mut w, 1, 10.0, 10.0, true);
+    let mut sure = input(1, 7, 1.0, 0.0, 1001, 0);
+    sure.ack = Some(AckTo::Gateway(77));
+    w.receive(sure.clone());
+    w.step(1001);
+    w.receive(sure); // sent again: the confirmation was lost
+    w.step(1002);
+    assert_eq!(x(&w, 1), 12.0, "applied once, from tick 1001");
+    let acks = w.take_acks();
+    assert_eq!(
+        (acks[0].0.as_str(), acks[0].1.envelopes.as_slice()),
+        ("gateway.77.acks", &[(1, 7), (1, 7)][..])
+    );
+}
+
+#[test]
+fn the_newest_input_applied_travels_with_a_handoff() {
+    let (mut a, mut b) = (world(1), world(2));
+    spawn_at(&mut a, 1, 10.0, 10.0, true);
+    a.receive(input(1, 5, 1.0, 0.0, 1001, 0));
+    a.step(1001);
+    hand_off(&mut a, &mut b, 1, 1001);
+    b.receive(input(1, 4, -1.0, 0.0, 1001, 0)); // older, reaching the new group late
+    b.step(1002);
+    assert_eq!(x(&b, 1), 12.0, "still walking east");
+}
+
 // ---- Handoffs ----
 
 #[test]
